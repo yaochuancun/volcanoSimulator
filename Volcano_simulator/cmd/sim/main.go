@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"net/http"
 	"strconv"
 	"time"
+
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"volcano.sh/apis/pkg/apis/scheduling"
 	"volcano.sh/volcano/cmd/sim/app/options"
 	"volcano.sh/volcano/pkg/kube"
@@ -21,18 +22,16 @@ import (
 	"volcano.sh/volcano/pkg/simulator"
 )
 
-
-
-var(
-	loadNewSchedulerConf = true //用于标记是否已经接收到新的schedulerConf
-	notCompletion = false //用于表示是否所有job都完成了
-	restartFlag = true //表示正在reset
-	cnt = int64(0) //循环次数
-	period = int64(-1) //表示多少次循环（秒）获取一次scheduler conf，-1表示除了开始阶段以外不加载conf
-	acts []framework.Action
-	tiers []conf.Tier
-	cfg []conf.Configuration
-	cluster = &schedulingapi.ClusterInfo{ //创建cluster
+var (
+	loadNewSchedulerConf = true      //用于标记是否已经接收到新的schedulerConf
+	notCompletion        = false     //用于表示是否所有job都完成了
+	restartFlag          = true      //表示正在reset
+	cnt                  = int64(0)  //循环次数
+	period               = int64(-1) //表示多少次循环（秒）获取一次scheduler conf，-1表示除了开始阶段以外不加载conf
+	acts                 []framework.Action
+	tiers                []conf.Tier
+	cfg                  []conf.Configuration
+	cluster              = &schedulingapi.ClusterInfo{ //创建cluster
 		Nodes:          make(map[string]*schedulingapi.NodeInfo),
 		Jobs:           make(map[schedulingapi.JobID]*schedulingapi.JobInfo),
 		Queues:         make(map[schedulingapi.QueueID]*schedulingapi.QueueInfo),
@@ -46,7 +45,7 @@ var(
 	})
 	defaultQueue *scheduling.Queue //k8s中的queue
 
-	startSimulate time.Time
+	startSimulate  time.Time
 	simulationTime time.Time
 )
 
@@ -96,7 +95,6 @@ func main() {
   }
 }`)
 
-
 	opts := &options.ServerOption{
 		SchedulerName:  "volcano",
 		SchedulePeriod: 5 * time.Minute,
@@ -116,13 +114,11 @@ func main() {
 	}
 	opts.RegisterOptions() //将以上参数注册（设置为全局变量）
 
-
 	var err error
 	err, defaultQueue = simulator.Json2Queue(jsonDefaultQueue)
 	if err != nil {
 		fmt.Println("error:", err)
 	}
-
 
 	queueInfo := schedulingapi.NewQueueInfo(defaultQueue)
 
@@ -131,9 +127,9 @@ func main() {
 		Weight: 1,
 	}
 
-	actions.InitV2()                                                                   //注册插件，否则UnmarshalSchedulerConfV2无法运行
+	actions.InitV2() //注册插件，否则UnmarshalSchedulerConfV2无法运行
 
-	cluster.Queues[queueInfo.UID] = queueInfo //将queue信息加入到cluster中
+	cluster.Queues[queueInfo.UID] = queueInfo                 //将queue信息加入到cluster中
 	cluster.NamespaceInfo[namespaceInfo.Name] = namespaceInfo //将namespace信息加入到cluster中
 
 	go server() //用于监听发到后端的信息，完成上述初始化再开始监视
@@ -141,21 +137,21 @@ func main() {
 	fmt.Print("simulator start...")
 
 	//一个循环1秒
-	for true{
+	for true {
 
 		for !notCompletion || restartFlag { //无job 或 等待reset，程序一开始会停在这，其执行到 等待加载conf 需要一点时间，因此reset后不能马上step
-			time.Sleep(time.Duration(0.2*1e9))
+			time.Sleep(time.Duration(0.2 * 1e9))
 		}
 
 		//fmt.Println(schedulingapi.NowTime)
 
 		//提交到时间的job
-		for !jobQueue.Empty(){
-			front:= jobQueue.Pop().(*schedulingapi.JobInfo)
+		for !jobQueue.Empty() {
+			front := jobQueue.Pop().(*schedulingapi.JobInfo)
 			if schedulingapi.NowTime.Time.Before(front.SubTimestamp.Time) { //“当前时间”在“sub时间”之前
 				jobQueue.Push(front)
 				break
-			} else{
+			} else {
 				cluster.Jobs[front.UID] = front //提交jobInfo
 				//fmt.Println(schedulingapi.NowTime,": submit",front.Name)
 
@@ -180,7 +176,7 @@ func main() {
 
 		//对于每个node，每隔interval，遍历task，找出最早创建的binding task改为running task
 		for _, node := range cluster.Nodes {
-			if node.CtnCreationTimeInterval!=0 && cnt%node.CtnCreationTimeInterval != 0{
+			if node.CtnCreationTimeInterval != 0 && cnt%node.CtnCreationTimeInterval != 0 {
 				continue
 			}
 			findFlag := false
@@ -189,20 +185,20 @@ func main() {
 				if task.Status != schedulingapi.Binding {
 					continue
 				}
-				if task.CtnCreationCountDown>0 {
+				if task.CtnCreationCountDown > 0 {
 					continue
 				}
-				if !findFlag{
+				if !findFlag {
 					selectTask = task
 					findFlag = true
 					continue
 				}
-				if task.Pod.CreationTimestamp.Before(&selectTask.Pod.CreationTimestamp){
+				if task.Pod.CreationTimestamp.Before(&selectTask.Pod.CreationTimestamp) {
 					selectTask = task
 				}
 			}
-			if findFlag{
-				fmt.Println("create container in",selectTask.NodeName,":",selectTask.Name,schedulingapi.NowTime)
+			if findFlag {
+				fmt.Println("create container in", selectTask.NodeName, ":", selectTask.Name, schedulingapi.NowTime)
 				//更改cluster中task状态，node中task为job中task之前的clone吗？
 				selectTask.Pod.Status.Phase = v1.PodRunning
 				cluster.Jobs[selectTask.Job].Tasks[selectTask.UID].Pod.Status.Phase = v1.PodRunning
@@ -210,8 +206,8 @@ func main() {
 				selectTask.Status = schedulingapi.Running
 				cluster.Jobs[selectTask.Job].Tasks[selectTask.UID].Status = schedulingapi.Running
 
-				selectTask.Pod.Status.StartTime =  schedulingapi.NowTime.DeepCopy()
-				cluster.Jobs[selectTask.Job].Tasks[selectTask.UID].Pod.Status.StartTime  =  schedulingapi.NowTime.DeepCopy()
+				selectTask.Pod.Status.StartTime = schedulingapi.NowTime.DeepCopy()
+				cluster.Jobs[selectTask.Job].Tasks[selectTask.UID].Pod.Status.StartTime = schedulingapi.NowTime.DeepCopy()
 				//todo 还要改job.TaskStatusIndex
 				//delete(cluster.Jobs[task.Job].TaskStatusIndex[schedulingapi.Binding], task.UID)
 			}
@@ -219,19 +215,17 @@ func main() {
 		}
 
 		//刚reset 或 够一个周期了，等待新的step（scheduler conf）
-		if (cnt == 0) || (period!=-1 && cnt%period == 0)  {
+		if (cnt == 0) || (period != -1 && cnt%period == 0) {
 			loadNewSchedulerConf = false
 			fmt.Println("wait for conf...")
 		}
 
-
-
-		for !loadNewSchedulerConf{
+		for !loadNewSchedulerConf {
 
 			time.Sleep(time.Duration(1e9))
 		}
 
-		if restartFlag{
+		if restartFlag {
 			continue
 		}
 
@@ -250,10 +244,10 @@ func main() {
 		notCompletion = clusterHasBindingTask() || !jobQueue.Empty()
 
 		//任务完成则
-		if !notCompletion{
+		if !notCompletion {
 			//打印运行信息
-			fmt.Println(schedulingapi.NowTime,"all complete")
-			fmt.Println("simulation time:",simulationTime )
+			fmt.Println(schedulingapi.NowTime, "all complete")
+			fmt.Println("simulation time:", simulationTime)
 			fmt.Println("---------------------\nNodes:")
 			for _, node := range cluster.Nodes {
 				//fmt.Println(node.Tasks)
@@ -261,12 +255,12 @@ func main() {
 				//	//fmt.Println(task.Pod.CreationTimestamp)
 				//	fmt.Println(task.NodeName)
 				//}
-				fmt.Println(node.Name,":")
-				fmt.Println("task num:",len(node.Tasks))
+				fmt.Println(node.Name, ":")
+				fmt.Println("task num:", len(node.Tasks))
 				//fmt.Println(node.Capability)
 				//fmt.Println(node.Allocatable) //没减少
-				fmt.Println("Idle:",node.Idle) //减少了
-				fmt.Println("Used:",node.Used)
+				fmt.Println("Idle:", node.Idle) //减少了
+				fmt.Println("Used:", node.Used)
 			}
 			fmt.Println("---------------------\nJobs:")
 			for _, job := range cluster.Jobs {
@@ -275,7 +269,7 @@ func main() {
 					fmt.Println(task.Name)
 					fmt.Println(task.Status)
 					fmt.Println(task.Pod.CreationTimestamp)
-					fmt.Println("job-create:",job.CreationTimestamp)
+					fmt.Println("job-create:", job.CreationTimestamp)
 					fmt.Println("sim-end:", task.SimEndTimestamp)
 				}
 			}
@@ -284,7 +278,7 @@ func main() {
 		//时间++
 		schedulingapi.NowTime = metav1.NewTime(schedulingapi.NowTime.Add(time.Duration(1e9))) //1e9表示1秒
 		cnt += 1
-		if cnt%1800 == 0{
+		if cnt%1800 == 0 {
 			//fmt.Println(cluster.Nodes)
 			fmt.Println(schedulingapi.NowTime)
 		}
@@ -332,11 +326,9 @@ func main() {
 	}
 }
 
-
-
-//用于监听
-func reset(w http.ResponseWriter, r *http.Request)  {
-	if notCompletion{
+// 用于监听
+func reset(w http.ResponseWriter, r *http.Request) {
+	if notCompletion {
 		//设置flag并等待程序执行到开头循环处
 		restartFlag = true
 		loadNewSchedulerConf = true //若在等待加载conf处则让其跳出等待
@@ -367,9 +359,8 @@ func reset(w http.ResponseWriter, r *http.Request)  {
 		Weight: 1,
 	}
 
-	cluster.Queues[queueInfo.UID] = queueInfo //将queue信息加入到cluster中
+	cluster.Queues[queueInfo.UID] = queueInfo                 //将queue信息加入到cluster中
 	cluster.NamespaceInfo[namespaceInfo.Name] = namespaceInfo //将namespace信息加入到cluster中
-
 
 	//时间和循环次数设置为0
 	cnt = 0
@@ -389,7 +380,7 @@ func reset(w http.ResponseWriter, r *http.Request)  {
 	//加载parameters
 	period_, err := strconv.Atoi(workload.Period)
 	period = int64(period_)
-	if err != nil{
+	if err != nil {
 		return
 	}
 
@@ -405,50 +396,49 @@ func reset(w http.ResponseWriter, r *http.Request)  {
 		cluster.Nodes[nodeInfo.Name] = nodeInfo
 
 		//从发过来的数据中读取，若无则会初始化为0
-		if float64(node.CtnCreationTimeInterval)<0.1 && float64(node.CtnCreationExtraTime)<0.1 &&
-			float64(node.CtnCreationTime)<0.1 { //default
+		if float64(node.CtnCreationTimeInterval) < 0.1 && float64(node.CtnCreationExtraTime) < 0.1 &&
+			float64(node.CtnCreationTime) < 0.1 { //default
 			nodeInfo.CtnCreationTime = 2
 			nodeInfo.CtnCreationExtraTime = 0.5
 			nodeInfo.CtnCreationTimeInterval = 1
-		}else{
+		} else {
 			nodeInfo.CtnCreationTime = node.CtnCreationTime
 			nodeInfo.CtnCreationExtraTime = node.CtnCreationExtraTime
 			nodeInfo.CtnCreationTimeInterval = node.CtnCreationTimeInterval
 		}
 
-		if node.CalculationSpeed < 0.1  { //default
+		if node.CalculationSpeed < 0.1 { //default
 			nodeInfo.CalculationSpeed = 1
-		}else{
+		} else {
 			nodeInfo.CalculationSpeed = node.CalculationSpeed
 		}
 
-		if node.MinimumSpeed < 0.1  { //default
+		if node.MinimumSpeed < 0.1 { //default
 			nodeInfo.MinimumSpeed = -1
-		}else{
+		} else {
 			nodeInfo.MinimumSpeed = node.MinimumSpeed
 		}
 
-		if node.SlowSpeedThreshold < 0.1  { //default
+		if node.SlowSpeedThreshold < 0.1 { //default
 			nodeInfo.SlowSpeedThreshold = -1
-		}else{
+		} else {
 			nodeInfo.SlowSpeedThreshold = node.SlowSpeedThreshold
 		}
 	}
 
-	for _,node := range cluster.Nodes{
-		fmt.Println(node.Name,":")
-		fmt.Println("Allocatable:",node.Allocatable)
-		fmt.Println("Capability:",node.Capability)
-		fmt.Println("Idle:",node.Idle)
-		fmt.Println("Used:",node.Used)
-		fmt.Println("Taints:",node.Node.Spec.Taints)
+	for _, node := range cluster.Nodes {
+		fmt.Println(node.Name, ":")
+		fmt.Println("Allocatable:", node.Allocatable)
+		fmt.Println("Capability:", node.Capability)
+		fmt.Println("Idle:", node.Idle)
+		fmt.Println("Used:", node.Used)
+		fmt.Println("Taints:", node.Node.Spec.Taints)
 	}
 
 	cluster.NodeList = make([]string, len(cluster.Nodes))
 	for _, ni := range cluster.Nodes {
 		cluster.NodeList = append(cluster.NodeList, ni.Name)
 	}
-
 
 	//加载job信息
 	err, jobs := simulator.Yaml2Jobs([]byte(workload.Workload))
@@ -459,9 +449,9 @@ func reset(w http.ResponseWriter, r *http.Request)  {
 		jobInfo := schedulingapi.NewJobInfoV2(job)
 		//设置job提交时间和创建时间
 		if subTime, found := job.Labels["sub-time"]; found {
-			if timestamp,err := strconv.Atoi(subTime); err == nil {
-				jobInfo.SubTimestamp = metav1.NewTime(time.Time{}.Add(time.Duration(timestamp*1e9)))
-				jobInfo.CreationTimestamp = metav1.NewTime(time.Time{}.Add(time.Duration(timestamp*1e9)))
+			if timestamp, err := strconv.Atoi(subTime); err == nil {
+				jobInfo.SubTimestamp = metav1.NewTime(time.Time{}.Add(time.Duration(timestamp * 1e9)))
+				jobInfo.CreationTimestamp = metav1.NewTime(time.Time{}.Add(time.Duration(timestamp * 1e9)))
 			}
 		}
 		//若没有该标签则提交时间默认为0
@@ -483,7 +473,7 @@ func reset(w http.ResponseWriter, r *http.Request)  {
 		v1NodeList = append(v1NodeList, v1Node)
 	}
 
-	info := simulator.Info{ Done: !notCompletion, V1Nodes: v1NodeList, Clock: schedulingapi.NowTime.Local().String()}
+	info := simulator.Info{Done: !notCompletion, V1Nodes: v1NodeList, Clock: schedulingapi.NowTime.Local().String()}
 	resp, _ := json.Marshal(info)
 	//fmt.Println(string(resp))
 
@@ -492,9 +482,8 @@ func reset(w http.ResponseWriter, r *http.Request)  {
 	w.Write(resp)
 }
 
-
-//用于监听
-func step(w http.ResponseWriter, r *http.Request)  {
+// 用于监听
+func step(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body) //转为字节[]byte
 	if err != nil {
 		panic(err)
@@ -506,8 +495,8 @@ func step(w http.ResponseWriter, r *http.Request)  {
 		panic(err)
 	}
 
-	if loadNewSchedulerConf{
-		time.Sleep(time.Duration(0.4*1e9))
+	if loadNewSchedulerConf {
+		time.Sleep(time.Duration(0.4 * 1e9))
 		fmt.Println("wait to load new conf")
 	}
 
@@ -529,9 +518,9 @@ func step(w http.ResponseWriter, r *http.Request)  {
 
 }
 
-//用于监听
-func stepResult(w http.ResponseWriter, r *http.Request)  {
-	if loadNewSchedulerConf && notCompletion{ //这一周期未运行完 且 job未完成，不返回当前状态
+// 用于监听
+func stepResult(w http.ResponseWriter, r *http.Request) {
+	if loadNewSchedulerConf && notCompletion { //这一周期未运行完 且 job未完成，不返回当前状态
 		w.Write([]byte(`0`))
 		return
 	}
@@ -556,14 +545,14 @@ func stepResult(w http.ResponseWriter, r *http.Request)  {
 		}
 	}
 
-	info := simulator.Info{ NotCompletion: notCompletion,
+	info := simulator.Info{NotCompletion: notCompletion,
 		Nodes: cluster.Nodes,
-		Jobs: cluster.Jobs,
+		Jobs:  cluster.Jobs,
 
-		Done: !notCompletion,
+		Done:    !notCompletion,
 		V1Nodes: v1NodeList,
-		Pods: PodList,
-		Clock: schedulingapi.NowTime.Local().String()}
+		Pods:    PodList,
+		Clock:   schedulingapi.NowTime.Local().String()}
 
 	//info := Info{ NotCompletion: notCompletion, Nodes: cluster.Nodes, Jobs: cluster.Jobs } //原
 
@@ -573,15 +562,15 @@ func stepResult(w http.ResponseWriter, r *http.Request)  {
 	w.Write(resp)
 }
 
-func stepResultAnyway(w http.ResponseWriter, r *http.Request)  {
-	info := simulator.Info{ NotCompletion: notCompletion, Nodes: cluster.Nodes, Jobs: cluster.Jobs }
+func stepResultAnyway(w http.ResponseWriter, r *http.Request) {
+	info := simulator.Info{NotCompletion: notCompletion, Nodes: cluster.Nodes, Jobs: cluster.Jobs}
 	resp, _ := json.Marshal(info)
 	//fmt.Println(string(resp))
 
 	w.Write(resp)
 }
 
-func server()  {
+func server() {
 	//if len(os.Args) < 2{
 	//	//未附带参数则默认8002
 	//	fmt.Println("\nport",port)
@@ -600,18 +589,3 @@ func server()  {
 	// 设置监听端口，等待响应
 	http.ListenAndServe(":8006", nil)
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
