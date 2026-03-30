@@ -6,11 +6,8 @@ import (
 	"io/ioutil"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"math"
-	"math/rand"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 	"volcano.sh/apis/pkg/apis/scheduling"
 	"volcano.sh/volcano/cmd/sim/app/options"
@@ -27,8 +24,6 @@ import (
 
 
 var(
-	asynchronousFlag = true //pod间是同步还是异步
-
 	loadNewSchedulerConf = true //用于标记是否已经接收到新的schedulerConf
 	notCompletion = false //用于表示是否所有job都完成了
 	restartFlag = true //表示正在reset
@@ -57,10 +52,34 @@ var(
 
 /*
 一些说明:
-1、目前把task.Pod.CreationTimestamp作为pod的运行开始时间
-2、Binding表示pod正在创建，Running表示pod在运行
-3、backfill需要重写
+1、未调度任务为 Pending；一旦分配到资源（含 Binding 容器创建阶段）Pod 对外 Phase 为 Running，且不再因“工作量完成”变为 Succeeded。
+2、Binding 表示调度已绑定节点、容器创建中；Task 进入 Running 后表示容器已就绪。
+3、仿真结束条件：待提交队列为空且无仍处于 Binding 的任务（容器创建队列跑完）。
 */
+func syncSimulationPodPhases() {
+	for _, job := range cluster.Jobs {
+		for _, task := range job.Tasks {
+			switch task.Status {
+			case schedulingapi.Pending, schedulingapi.Pipelined:
+				task.Pod.Status.Phase = v1.PodPending
+			default:
+				task.Pod.Status.Phase = v1.PodRunning
+			}
+		}
+	}
+}
+
+func clusterHasBindingTask() bool {
+	for _, job := range cluster.Jobs {
+		for _, task := range job.Tasks {
+			if task.Status == schedulingapi.Binding {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func main() {
 
 	var jsonDefaultQueue = []byte(`{
@@ -117,15 +136,6 @@ func main() {
 	cluster.Queues[queueInfo.UID] = queueInfo //将queue信息加入到cluster中
 	cluster.NamespaceInfo[namespaceInfo.Name] = namespaceInfo //将namespace信息加入到cluster中
 
-	//用于让job同时开始、完成
-	startInstNum:= make(map[string]int32) //key为job
-	startInstNumNow:= make(map[string]int32) //key为job
-	jobTotalTime := make(map[string]float64) //key为job
-	instStartFlag := make(map[string]int32) //key为task，value为1表示task已经开始且已被统计
-	instResetFlag := make(map[string]int32) //key为task，value为1表示task已经重设了运行时间
-	instWorkload := make(map[string]float64) //key为task，表示异步时实例的工作量
-
-
 	go server() //用于监听发到后端的信息，完成上述初始化再开始监视
 
 	fmt.Print("simulator start...")
@@ -149,74 +159,9 @@ func main() {
 				cluster.Jobs[front.UID] = front //提交jobInfo
 				//fmt.Println(schedulingapi.NowTime,": submit",front.Name)
 
-				//若job提交就设置创建时间，pod处于pengding状态就有创建时间了
-				for _,task := range front.Tasks{
+				//若job提交就设置创建时间，pod处于pending状态就有创建时间了
+				for _, task := range front.Tasks {
 					task.Pod.SetCreationTimestamp(schedulingapi.NowTime) //设置pod创建时间，1e9为1秒
-				}
-
-				//设置对应job的完成task数的map
-				jobTotalTime[string(front.UID)] = 0
-				startInstNum[string(front.UID)] = front.MinAvailable
-				startInstNumNow[string(front.UID)] = 0
-				for _,task := range front.Tasks{
-					instResetFlag[task.Name] = 0
-					instStartFlag[task.Name] = 0
-
-					//job或pod设置工作量
-					if !asynchronousFlag { //同步，job
-						if simTime, found := task.Pod.Labels["sim-time"]; found {
-							if timestamp,err := strconv.Atoi(simTime); err == nil {
-								jobTotalTime[string(front.UID)] += float64( timestamp  ) * 1.05 //Todo
-								if front.MinAvailable>1{
-									jobTotalTime[string(front.UID)] += 0 //互相联系所需时间成本 //Todo
-								}
-							}
-						}
-					} else { //异步，pod
-						epoch := strings.Split(task.Pod.Spec.Containers[0].Command[2],"=")[1]
-						workload := float64(135)
-						if epochNum, err := strconv.Atoi(epoch); err == nil {
-							workload = float64(epochNum * 135)
-						}
-						instWorkload[task.Name] = workload
-						task.Workload = workload
-					}
-
-					//设置pod重启时间和终止时间
-					if asynchronousFlag{
-						if restartTime, found := task.Pod.Labels["restartTime"]; found {
-							if timestamp,err := strconv.Atoi(restartTime); err == nil {
-								task.RestartTime = float64(timestamp)
-							}
-						} else{
-							task.RestartTime = -1
-						}
-
-						if restartLimit, found := task.Pod.Labels["restartLimit"]; found {
-							if num,err := strconv.Atoi(restartLimit); err == nil {
-								cluster.Jobs[task.Job].RestartNum = float64(num)
-							}
-						} else{
-							cluster.Jobs[task.Job].RestartNum = -1
-						}
-
-						if terminationTime, found := task.Pod.Labels["terminationTime"]; found {
-							if timestamp,err := strconv.Atoi(terminationTime); err == nil {
-								task.TerminationTime = float64(timestamp)
-							}
-						} else{
-							task.TerminationTime = -1
-						}
-
-						if terminationLimit, found := task.Pod.Labels["terminationLimit"]; found {
-							if num,err := strconv.Atoi(terminationLimit); err == nil {
-								cluster.Jobs[task.Job].TerminationNum = float64(num)
-							}
-						} else{
-							cluster.Jobs[task.Job].TerminationNum = -1
-						}
-					}
-
 				}
 			}
 		}
@@ -273,414 +218,6 @@ func main() {
 
 		}
 
-		//减少运行中job或pod的工作量
-		if asynchronousFlag{ //异步
-
-			//遍历node中task，计算node的request cpu和limit cpu
-			for _, node := range cluster.Nodes {
-				node.CpuTotal = node.Allocatable.MilliCPU
-				node.CpuReq = 0
-				node.CpuLimits = 0
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-
-					cpuLimitsQuantity := task.Pod.Spec.Containers[0].Resources.Limits["cpu"]
-					cpuReqQuantity := task.Pod.Spec.Containers[0].Resources.Requests["cpu"]
-					node.CpuReq += cpuReqQuantity.AsApproximateFloat64() * 1000
-					node.CpuLimits += cpuLimitsQuantity.AsApproximateFloat64() * 1000
-
-				}
-				//if gpu,found:= node.Allocatable.ScalarResources["nvidia.com/gpu"];found{
-				//	fmt.Println("gpu",gpu)
-				//}
-
-			}
-			//遍历node，根据cpu占用率重新给出新的计算速度
-			for _, node := range cluster.Nodes {
-				minimumSpeed := node.MinimumSpeed
-				slowSpeedThreshold := node.SlowSpeedThreshold
-				if minimumSpeed<0 || slowSpeedThreshold<0{ //配置文件未给出，故不变
-					node.CpuCalculationSpeed = node.CalculationSpeed
-				}else if node.CpuReq/node.CpuTotal>0.99{
-					node.CpuCalculationSpeed = minimumSpeed
-				}else if node.CpuReq/node.CpuTotal>slowSpeedThreshold && node.CalculationSpeed>minimumSpeed{
-					node.CpuCalculationSpeed = node.CalculationSpeed -
-						(node.CpuReq/node.CpuTotal-slowSpeedThreshold)/(1-slowSpeedThreshold)*(node.CalculationSpeed-minimumSpeed)
-				}else {
-					node.CpuCalculationSpeed = node.CalculationSpeed
-				}
-				//fmt.Println(node.Name)
-				//fmt.Println("cpu percent:",node.CpuReq/node.CpuTotal,node.CpuReq,node.CpuTotal)
-				//fmt.Println(minimumSpeed,slowSpeedThreshold)
-				//fmt.Println(node.CpuCalculationSpeed)
-			}
-			//遍历node中task，计算task实际分到的cpu
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					cpuLimitsQuantity := task.Pod.Spec.Containers[0].Resources.Limits["cpu"]
-					cpuReqQuantity := task.Pod.Spec.Containers[0].Resources.Requests["cpu"]
-					cpuLimitsV := cpuLimitsQuantity.AsApproximateFloat64() * 1000
-					cpuReqV := cpuReqQuantity.AsApproximateFloat64() * 1000
-
-					task.ActualCpu = math.Min( cpuReqV+(cpuLimitsV-cpuReqV)/(node.CpuLimits-node.CpuReq)*(node.CpuTotal-node.CpuReq),cpuLimitsV) //原，以limit-req为权重
-
-					//task.ActualCpu = math.Min( node.CpuTotal*(cpuLimitsV/node.CpuLimits),cpuLimitsV )
-					//newCpu := math.Min(p.GetReqCpu()+(p.GetLimCpu()-p.GetReqCpu())/(totalLimitCpu-totalReqCpu)*leftCpu, p.GetLimCpu())
-					//task.ActualCpu = math.Min( cpuReqV+((cpuLimitsV)/(node.CpuTotal-node.CpuReq)),cpuLimitsV) //以limit为权重
-				}
-			}
-
-			//遍历task，减少它的工作量
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-
-					//todo:时间需要根据实际的负载进行微调
-
-					gpuLimitsQuantity := task.Pod.Spec.Containers[0].Resources.Limits["nvidia.com/gpu"]
-					gpuLimitsV := gpuLimitsQuantity.AsApproximateFloat64() * 1000
-					if gpuLimitsV < 0.1 {//无gpu
-						if task.ActualCpu>3.2*1000 {
-							instWorkload[task.Name] -= 3 * node.CpuCalculationSpeed
-						} else if task.ActualCpu>2.8*1000 {
-							instWorkload[task.Name] -= (task.ActualCpu/1000-0.2) * node.CpuCalculationSpeed
-						} else if task.ActualCpu>2.6*1000 {
-							instWorkload[task.Name] -= (task.ActualCpu/1000-0.25) * node.CpuCalculationSpeed
-						} else if task.ActualCpu>0.8*1000 {
-							instWorkload[task.Name] -= (task.ActualCpu/1000-0.3) * node.CpuCalculationSpeed
-						} else if task.ActualCpu>0.64*1000 {
-							instWorkload[task.Name] -= (task.ActualCpu/1000-0.27) * node.CpuCalculationSpeed
-						} else if task.ActualCpu>0.45*1000 {
-							instWorkload[task.Name] -= (task.ActualCpu/1000-0.24) * node.CpuCalculationSpeed
-						} else {
-							instWorkload[task.Name] -= (0.46*task.ActualCpu/1000) * node.CpuCalculationSpeed
-						}
-					} else { //有gpu
-						if task.ActualCpu>1000 {
-							instWorkload[task.Name] -= 7.5 * node.CalculationSpeed
-						} else {
-							instWorkload[task.Name] -= 7.5 * (task.ActualCpu-50) / 1000 * node.CalculationSpeed
-						}
-					}
-
-					//jobTotalTime[string(task.Job)] -= 1*(task.ActualCpu)/cpuLimitsV //真实中大概会有limits值10分之一的cpu不用于计算
-
-					//jobTotalTime[string(task.Job)] -= 1
-				}
-			}
-
-			//遍历task，把task的工作量等于0的task重新设置end-time(加随机数)
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if instResetFlag[task.Name] == 1{
-						continue
-					}
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if instWorkload[task.Name]>0 { //task剩余工作量大于0
-						continue
-					}
-					//修改task完成时间
-					rand_end := rand.Intn(1)
-					//rand_end := 5
-					task.SimEndTimestamp = metav1.NewTime(schedulingapi.NowTime.Add(time.Duration(rand_end)*1e9))
-					cluster.Jobs[task.Job].Tasks[task.UID].SimEndTimestamp =
-						metav1.NewTime(schedulingapi.NowTime.Add(time.Duration((rand_end)*1e9))) //两个都要改，10表示每个容器的初始化时间
-					instResetFlag[task.Name] = 1
-				}
-			}
-
-			//遍历task，把到达新设置end-time的task完成并回收资源
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if instResetFlag[task.Name] == 0  { //未重置
-						continue
-					}
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if schedulingapi.NowTime.Time.Before(task.SimEndTimestamp.Time) { //“当前时间”在“end时间”之前
-						continue
-					}
-
-					//返还资源
-					node.Idle.Add(task.Resreq)
-					node.Used.Sub(task.Resreq)
-					//更改cluster中task状态
-					task.Pod.Status.Phase = v1.PodSucceeded
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.Phase = v1.PodSucceeded
-
-					task.Pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.NewTime(schedulingapi.NowTime.Local())
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.NewTime(schedulingapi.NowTime.Local())
-
-					task.Status = schedulingapi.Succeeded
-					cluster.Jobs[task.Job].Tasks[task.UID].Status = schedulingapi.Succeeded
-
-					//同步重启次数
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.ContainerStatuses[0].RestartCount = task.Pod.Status.ContainerStatuses[0].RestartCount
-
-					//输出完成提示
-					//fmt.Println(task.Name,"complete:",task.Pod.CreationTimestamp,task.SimEndTimestamp)
-
-					//修改tasks map
-					taskKey := schedulingapi.TaskID(fmt.Sprintf("%v/%v", task.Pod.Namespace, task.Pod.Name))
-
-					//还要改job.TaskStatusIndex todo: delete Running
-					delete(cluster.Jobs[task.Job].TaskStatusIndex[schedulingapi.Binding], task.UID)
-
-					delete(node.Tasks, taskKey)
-				}
-			}
-
-			//遍历task，把failed的task完成并回收资源
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Failed {
-						continue
-					}
-					//返还资源
-					node.Idle.Add(task.Resreq)
-					node.Used.Sub(task.Resreq)
-					//更改cluster中task状态
-					task.Pod.Status.Phase = v1.PodFailed
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.Phase = v1.PodFailed
-
-					task.Pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.NewTime(schedulingapi.NowTime.Local())
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.NewTime(schedulingapi.NowTime.Local())
-
-					task.Status = schedulingapi.Succeeded //为了避免重启，设置为了Succeeded
-					cluster.Jobs[task.Job].Tasks[task.UID].Status = schedulingapi.Succeeded
-
-					task.SimEndTimestamp = metav1.NewTime(schedulingapi.NowTime.Time)
-					cluster.Jobs[task.Job].Tasks[task.UID].SimEndTimestamp = metav1.NewTime(schedulingapi.NowTime.Time)
-
-					//同步重启次数
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.ContainerStatuses[0].RestartCount = task.Pod.Status.ContainerStatuses[0].RestartCount
-
-					//输出完成提示
-					//fmt.Println(task.Name,"complete:",task.Pod.CreationTimestamp,task.SimEndTimestamp)
-
-					//修改tasks map
-					taskKey := schedulingapi.TaskID(fmt.Sprintf("%v/%v", task.Pod.Namespace, task.Pod.Name))
-
-					//还要改job.TaskStatusIndex todo: delete Running
-					delete(cluster.Jobs[task.Job].TaskStatusIndex[schedulingapi.Binding], task.UID)
-
-					delete(node.Tasks, taskKey)
-				}
-			}
-
-			//遍历task，查看task的运行时间，并把超时的 重启 或 Fail
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if task.RestartTime == -1 && task.TerminationTime == -1{
-						continue
-					}
-
-					//已运行总时间
-					runTime := schedulingapi.NowTime.Sub(task.Pod.Status.StartTime.Time).Seconds()  //todo: 总时间里包含了容器创建时间，故减去该时间（预计为5）
-					//重启次数
-					restartCount := float64(task.Pod.Status.ContainerStatuses[0].RestartCount)
-					//重启后运行时间
-					runTimeAfterRestart := runTime - (restartCount  * task.RestartTime)
-
-					//重启超时pod
-					if task.RestartTime != -1 && runTimeAfterRestart > task.RestartTime && restartCount < 1 {
-						//若 未达到重启个数上限 或 该pod已重启过
-						if (cluster.Jobs[task.Job].RestartNum > 0 || cluster.Jobs[task.Job].RestartNum  <= -1) || (restartCount > 0) { //重启pod数有限
-							instWorkload[task.Name] = task.Workload * 0.2
-							task.Pod.Status.ContainerStatuses[0].RestartCount += 1
-							if task.Pod.Status.ContainerStatuses[0].RestartCount == 1 { //若pod第一次重启
-								cluster.Jobs[task.Job].RestartNum -= 1
-							}
-						}
-					}
-
-					//终止超时pod
-					if task.TerminationTime != -1 && runTimeAfterRestart > task.TerminationTime{
-						if cluster.Jobs[task.Job].TerminationNum > 0 || cluster.Jobs[task.Job].TerminationNum  <= -1 { //终止pod数有限
-							task.Status = schedulingapi.Failed
-							cluster.Jobs[task.Job].TerminationNum  -= 1
-						}
-					}
-				}
-			}
-
-		} else{ //非异步
-			//遍历task，统计job中已开始task数
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if instStartFlag[task.Name] == 0 {
-						instStartFlag[task.Name] = 1
-						startInstNumNow[string(task.Job)] += 1
-						//fmt.Println("num:",startInstNumNow[string(task.Job)])
-					}
-				}
-			}
-
-			//遍历node中task，计算node的request cpu和limit cpu
-			for _, node := range cluster.Nodes {
-				node.CpuTotal = node.Allocatable.MilliCPU
-				node.CpuReq = 0
-				node.CpuLimits = 0
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-
-					cpuLimitsQuantity := task.Pod.Spec.Containers[0].Resources.Limits["cpu"]
-					cpuReqQuantity := task.Pod.Spec.Containers[0].Resources.Requests["cpu"]
-					node.CpuReq += cpuReqQuantity.AsApproximateFloat64() * 1000
-					node.CpuLimits += cpuLimitsQuantity.AsApproximateFloat64() * 1000
-				}
-			}
-
-			//遍历node中task，计算task实际分到的cpu
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					cpuLimitsQuantity := task.Pod.Spec.Containers[0].Resources.Limits["cpu"]
-					cpuReqQuantity := task.Pod.Spec.Containers[0].Resources.Requests["cpu"]
-					cpuLimitsV := cpuLimitsQuantity.AsApproximateFloat64() * 1000
-					cpuReqV := cpuReqQuantity.AsApproximateFloat64() * 1000
-
-					task.ActualCpu = math.Min( cpuReqV+(cpuLimitsV-cpuReqV)/(node.CpuLimits-node.CpuReq)*(node.CpuTotal-node.CpuReq),cpuLimitsV) //原，以limit-req为权重
-
-					//task.ActualCpu = math.Min( node.CpuTotal*(cpuLimitsV/node.CpuLimits),cpuLimitsV )
-					//newCpu := math.Min(p.GetReqCpu()+(p.GetLimCpu()-p.GetReqCpu())/(totalLimitCpu-totalReqCpu)*leftCpu, p.GetLimCpu())
-					//task.ActualCpu = math.Min( cpuReqV+((cpuLimitsV)/(node.CpuTotal-node.CpuReq)),cpuLimitsV) //以limit为权重
-				}
-			}
-
-			//遍历task，减少它的job的总运行时间
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if  startInstNumNow[string(task.Job)] < startInstNum[string(task.Job)] {//未达到minAvailable
-						continue
-					}
-					cpuLimitsQuantity := task.Pod.Spec.Containers[0].Resources.Limits["cpu"]
-					cpuLimitsV := cpuLimitsQuantity.AsApproximateFloat64() * 1000
-
-					//todo:时间需要根据实际的负载进行微调
-					percent := task.ActualCpu/cpuLimitsV
-
-					//if percent>0.95 { //分配了足够cpu
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.12) * node.CalculationSpeed //关键 0.12和0.1不同 0.12
-					//} else if percent>0.9{
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.12) * node.CalculationSpeed //0.12
-					//}else if percent>0.7{
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.18) * node.CalculationSpeed //0.12
-					//}else if percent>0.6{
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.12) * node.CalculationSpeed //关键 0.12和0.1不同 0.12
-					//}else if percent>0.5{
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.08) * node.CalculationSpeed //0.08
-					//} else{ //可能存在资源争用，导致速度更慢？故减0.125
-					//	jobTotalTime[string(task.Job)] -= (1*percent - 0.05) * node.CalculationSpeed //真实中大概会有limits值8分之一的cpu不用于计算 //0.05
-					//}
-
-					//if percent>0.95 { //分配了足够cpu
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.12) * node.CalculationSpeed //关键 0.12和0.1不同 0.12
-					//}else if percent>0.7{
-					//	jobTotalTime[string(task.Job)] -= (1*percent -0.18) * node.CalculationSpeed //0.12
-					//} else{ //可能存在资源争用，导致速度更慢？故减0.125
-					//	jobTotalTime[string(task.Job)] -= (1*percent - 0.05) * node.CalculationSpeed //真实中大概会有limits值8分之一的cpu不用于计算 //0.05
-					//}
-
-					jobTotalTime[string(task.Job)] -= 0.82 *percent * node.CalculationSpeed
-
-					//jobTotalTime[string(task.Job)] -= 1*(task.ActualCpu)/cpuLimitsV //真实中大概会有limits值10分之一的cpu不用于计算
-
-					//jobTotalTime[string(task.Job)] -= 1
-				}
-			}
-
-			//遍历task，把job的总运行时间小于等于0的task重新设置end-time(加随机数)
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if instResetFlag[task.Name] == 1{
-						continue
-					}
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if  jobTotalTime[string(task.Job)]>0 { // job的总运行时间大于0
-						continue
-					}
-
-					//修改task完成时间
-					rand_end := rand.Intn(2)
-					//rand_end := 5
-					task.SimEndTimestamp = metav1.NewTime(schedulingapi.NowTime.Add(time.Duration(rand_end)*1e9))
-					cluster.Jobs[task.Job].Tasks[task.UID].SimEndTimestamp =
-						metav1.NewTime(schedulingapi.NowTime.Add(time.Duration((rand_end)*1e9))) //两个都要改，10表示每个容器的初始化时间
-					instResetFlag[task.Name] = 1
-				}
-			}
-
-			//遍历task，把完成task数达到要求的job的 且 到达新设置end-time的 task 完成并回收资源
-			for _, node := range cluster.Nodes {
-				for _, task := range node.Tasks {
-					if instResetFlag[task.Name] == 0{ //未重置
-						continue
-					}
-					if task.Status != schedulingapi.Running {
-						continue
-					}
-					if schedulingapi.NowTime.Time.Before(task.SimEndTimestamp.Time) { //“当前时间”在“end时间”之前
-						continue
-					}
-					if  jobTotalTime[string(task.Job)]>0 { //job的总运行时间大于0
-						continue
-					}
-
-					//返还资源
-					node.Idle.Add(task.Resreq)
-					node.Used.Sub(task.Resreq)
-					//更改cluster中task状态
-					task.Pod.Status.Phase = v1.PodSucceeded
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.Phase = v1.PodSucceeded
-
-					task.Pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.NewTime(schedulingapi.NowTime.Local())
-					cluster.Jobs[task.Job].Tasks[task.UID].Pod.Status.ContainerStatuses[0].State.Terminated.FinishedAt = metav1.NewTime(schedulingapi.NowTime.Local())
-
-					task.Status = schedulingapi.Succeeded
-					cluster.Jobs[task.Job].Tasks[task.UID].Status = schedulingapi.Succeeded
-
-					//输出完成提示
-					//fmt.Println(task.Name,"complete:",task.Pod.CreationTimestamp,task.SimEndTimestamp)
-
-					//修改tasks map
-					taskKey := schedulingapi.TaskID(fmt.Sprintf("%v/%v", task.Pod.Namespace, task.Pod.Name))
-
-					//还要改job.TaskStatusIndex todo: delete Running
-					delete(cluster.Jobs[task.Job].TaskStatusIndex[schedulingapi.Binding], task.UID)
-
-					delete(node.Tasks, taskKey)
-				}
-			}
-
-		}
-
-
 		//刚reset 或 够一个周期了，等待新的step（scheduler conf）
 		if (cnt == 0) || (period!=-1 && cnt%period == 0)  {
 			loadNewSchedulerConf = false
@@ -707,30 +244,13 @@ func main() {
 
 		//framework.CloseSession(ssn) //会报错
 
-		//判断task是否都完成了
-		notCompletion = false
-		for _, job := range cluster.Jobs {
-			for _, task := range job.Tasks {
-				if task.Status != schedulingapi.Succeeded{
-					notCompletion = true
-					break
-				}
-			}
-			if notCompletion{
-				break
-			}
-		}
-		if !jobQueue.Empty(){
-			notCompletion = true
-		}
+		syncSimulationPodPhases()
 
+		// 回合稳定：待提交队列为空且无仍处于 Binding（容器创建中）的任务
+		notCompletion = clusterHasBindingTask() || !jobQueue.Empty()
 
 		//任务完成则
 		if !notCompletion{
-			jobTotalTime = make(map[string]float64) //key为job
-			instStartFlag = make(map[string]int32) //key为task，value为1表示task已经重设了运行时间
-			instResetFlag = make(map[string]int32)
-			instWorkload = make(map[string]float64)
 			//打印运行信息
 			fmt.Println(schedulingapi.NowTime,"all complete")
 			fmt.Println("simulation time:",simulationTime )
