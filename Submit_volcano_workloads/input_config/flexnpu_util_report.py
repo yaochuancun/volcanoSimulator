@@ -126,11 +126,13 @@ def estimate_card_usage(
     Dict[Tuple[str, str], float],
     Dict[Tuple[str, str], float],
     Dict[Tuple[str, str], Dict[str, Any]],
+    Dict[Tuple[str, str], Dict[str, Dict[str, float]]],
 ]:
     used_core: Dict[Tuple[str, str], float] = defaultdict(float)
     used_mem: Dict[Tuple[str, str], float] = defaultdict(float)
     rr: Dict[str, int] = defaultdict(int)
     pod_assign: DefaultDict[Tuple[str, str], Dict[str, Any]] = defaultdict(_new_pod_assign_entry)
+    pod_chip_share: DefaultDict[Tuple[str, str], Dict[str, Dict[str, float]]] = defaultdict(dict)
 
     for _jid, job, _tid, task in _iter_tasks_with_pod(jobs):
         node = task.get("NodeName") or task.get("nodeName") or ""
@@ -181,16 +183,23 @@ def estimate_card_usage(
             ent["union"].update(assigned)
             ent["by_container"].append((cname, list(assigned)))
 
-    return used_core, used_mem, dict(pod_assign)
+            pk = (node, pref)
+            for cid in assigned:
+                ck = f"{node}-{cid}"
+                if ck not in pod_chip_share[pk]:
+                    pod_chip_share[pk][ck] = {"core": 0.0, "mem": 0.0}
+                pod_chip_share[pk][ck]["core"] += per_c
+                pod_chip_share[pk][ck]["mem"] += per_m
+
+    return used_core, used_mem, dict(pod_assign), {k: dict(v) for k, v in pod_chip_share.items()}
 
 
-def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
-    lines: List[str] = []
+def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Build node card ids and per-card / per-pod flexnpu estimates from stepResult."""
     nodes = resultdata.get("Nodes") or resultdata.get("nodes") or {}
     jobs = resultdata.get("Jobs") or resultdata.get("jobs") or {}
-
     if not isinstance(nodes, dict):
-        return "[flexnpu] No Nodes in stepResult.\n"
+        return None
 
     node_card_ids: Dict[str, List[str]] = {}
     for nname, ninfo in nodes.items():
@@ -200,7 +209,30 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
         ids, _, _ = _card_caps_sorted(ann)
         node_card_ids[str(nname)] = [str(x) for x in ids]
 
-    card_used_core, card_used_mem, pod_assign = estimate_card_usage(jobs, node_card_ids)
+    card_used_core, card_used_mem, pod_assign, pod_chip_share = estimate_card_usage(
+        jobs, node_card_ids
+    )
+    return {
+        "nodes": nodes,
+        "jobs": jobs,
+        "node_card_ids": node_card_ids,
+        "card_used_core": card_used_core,
+        "card_used_mem": card_used_mem,
+        "pod_assign": pod_assign,
+        "pod_chip_share": pod_chip_share,
+    }
+
+
+def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
+    lines: List[str] = []
+    snap = compute_flexnpu_snapshot(resultdata)
+    if snap is None:
+        return "[flexnpu] No Nodes in stepResult.\n"
+
+    nodes = snap["nodes"]
+    card_used_core = snap["card_used_core"]
+    card_used_mem = snap["card_used_mem"]
+    pod_assign = snap["pod_assign"]
 
     lines.append("=== FlexNPU utilization (node aggregate from scheduler NodeInfo) ===")
     for nname in sorted(nodes.keys()):

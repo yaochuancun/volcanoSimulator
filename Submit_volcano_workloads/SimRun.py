@@ -1,5 +1,6 @@
 from common.utils.json_http_client import JsonHttpClient
 from input_config.flexnpu_util_report import print_flexnpu_utilization
+from input_config.output_csv_reports import write_output_config_csvs
 from input_config.input_config_loader import (
     load_cluster_for_simulator,
     load_plugins_for_simulator,
@@ -121,6 +122,10 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url):
                 encoding="utf-8",
             ) as flex_fp:
                 flex_fp.write(flexnpu_txt)
+
+            output_config_dir = os.path.join(pods_result_url, "output_config")
+            os.makedirs(output_config_dir, exist_ok=True)
+            write_output_config_csvs(resultdata, output_config_dir)
 
             job_result = os.path.join(jobs_result_url, 'coutJCT.csv')
             with open(job_result, "w", encoding='utf-8', newline='') as file1:
