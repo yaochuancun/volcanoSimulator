@@ -8,6 +8,17 @@ from .job_data_reading import read_data_from_directories
 from .makespan import draw_makespan
 from .jct_avg import draw_jct_avg
 
+
+def _plot_style_context():
+    try:
+        import scienceplots  # noqa: F401
+    except ImportError:
+        pass
+    if "ieee" in plt.style.available:
+        return plt.style.context("ieee")
+    return plt.style.context("default")
+
+
 #algorithms = ["conf_1", "conf_2", "conf_3", "conf_4", "conf_5", "conf_6", "conf_7", "conf_8", "conf_9", "conf_10", "conf_11", "conf_12"]
 drl_name = 'DRL'
 
@@ -29,7 +40,7 @@ def draw_job_figures(
         save_filename: str = None,
         show_figure: bool = True,
 ):
-    with plt.style.context('ieee'):
+    with _plot_style_context():
         now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
         save_filename = save_filename or root_dir.replace('/', '_') + now + ".pdf"
 
@@ -83,7 +94,7 @@ def draw_job_figures1(
         save_filename: str = None,
         show_figure: bool = True,
 ):
-    with plt.style.context('ieee'):
+    with _plot_style_context():
         now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
         save_filename = save_filename or root_dir.replace('/', '_') + now + ".pdf"
 
@@ -136,7 +147,7 @@ def draw_job_figures2(
         save_filename: str = None,
         show_figure: bool = True,
 ):
-    with plt.style.context('ieee'):
+    with _plot_style_context():
         now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
         save_filename = save_filename or root_dir.replace('/', '_') + now + ".png"
 

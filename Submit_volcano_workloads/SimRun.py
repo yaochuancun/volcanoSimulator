@@ -16,6 +16,21 @@ from figures.figures import draw_job_figures2
 import matplotlib.pyplot as plt
 import numpy as np
 
+
+def _plot_style_context():
+    """Use IEEE style if registered (e.g. pip install scienceplots + import); else default.
+
+    Note: plt.style.context('ieee') only fails inside __enter__, so we must check availability first.
+    """
+    try:
+        import scienceplots  # noqa: F401 — registers 'ieee' in plt.style.available when installed
+    except ImportError:
+        pass
+    if "ieee" in plt.style.available:
+        return plt.style.context("ieee")
+    return plt.style.context("default")
+
+
 def _get_key_or_empty(data, key):
     pods = munch.munchify(data[key])
     return pods if pods is not None else []
@@ -45,7 +60,7 @@ def reset(sim_base_url, node_file_url, workload_file_url):
 
 def step(sim_base_url, conf_file_url, pods_result_url, jobs_result_url, figures_result_url, scheduler):
 
-    with plt.style.context('ieee'):
+    with _plot_style_context():
 
         client = JsonHttpClient(sim_base_url)
 

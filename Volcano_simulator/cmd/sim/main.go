@@ -52,7 +52,7 @@ var(
 
 /*
 一些说明:
-1、未调度任务为 Pending；一旦分配到资源（含 Binding 容器创建阶段）Pod 对外 Phase 为 Running，且不再因“工作量完成”变为 Succeeded。
+1、未调度及 Binding（已绑节点、容器创建中）对外 Pod Phase 均为 Pending；Task 进入 Running 后对外为 Running，且不再因“工作量完成”变为 Succeeded。
 2、Binding 表示调度已绑定节点、容器创建中；Task 进入 Running 后表示容器已就绪。
 3、仿真结束条件：待提交队列为空且无仍处于 Binding 的任务（容器创建队列跑完）。
 */
@@ -60,7 +60,7 @@ func syncSimulationPodPhases() {
 	for _, job := range cluster.Jobs {
 		for _, task := range job.Tasks {
 			switch task.Status {
-			case schedulingapi.Pending, schedulingapi.Pipelined:
+			case schedulingapi.Pending, schedulingapi.Pipelined, schedulingapi.Binding:
 				task.Pod.Status.Phase = v1.PodPending
 			default:
 				task.Pod.Status.Phase = v1.PodRunning
