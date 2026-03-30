@@ -1,3 +1,0 @@
-Pending: 0
-Running: 11
-Total pods: 11
