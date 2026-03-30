@@ -122,6 +122,8 @@ kubernetes.tar.gz
 
 /bazel-*
 *.pyc
+__pycache__/
+*.exe
 
 # e2e log files
 *.log
@@ -130,3 +132,5 @@ kubernetes.tar.gz
 coverage.txt
 
 
+**/volcano-sim-result/
+Submit_volcano_workloads/volcano-sim-result
