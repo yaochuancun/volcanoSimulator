@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: PluginList
+scheduler:
+  actions: "enqueue, allocate, backfill, preempt"
+  tiers:
+    - plugins:
+      - name: priority
+      - name: gang
+        enablePreemptable: false
+        enableJobStarving: false
+      - name: conformance
+    - plugins:
+      - name: drf
+        enablePreemptable: false
+      - name: predicates
+      - name: nodeorder
+    - plugins:
+      - name: cce-gpu-topology-predicate
+      - name: cce-gpu-topology-priority
+      - name: xgpu
+      - name: flexnpuaffinity
+        arguments:
+          requestAicoreWeight: 10.0
+          requestMemoryWeight: 10.0
+          nodeAicoreWeight: 10.0
+          nodeMemoryWeight: 10.0
+          scheduleMode: "binpack"
+output:
+  outDir: ./result/run-plugin-flexnpu-{date}
+  formats:
+    - csv

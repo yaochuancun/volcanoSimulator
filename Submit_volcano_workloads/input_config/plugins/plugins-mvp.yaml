@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PluginList
+scheduler:
+  actions: "enqueue, allocate"
+  tiers:
+    - plugins:
+      - name: flexnpuaffinity
+        arguments:
+          requestAicoreWeight: 10.0
+          requestMemoryWeight: 10.0
+          nodeAicoreWeight: 10.0
+          nodeMemoryWeight: 10.0
+          scheduleMode: "binpack"
+output:
+  outDir: ./result/run-plugin-flexnpu-{date}
+  formats:
+    - csv
