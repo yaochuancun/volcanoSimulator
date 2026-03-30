@@ -134,3 +134,6 @@ coverage.txt
 
 **/volcano-sim-result/
 Submit_volcano_workloads/volcano-sim-result
+
+# SimRun plugin output (input_config plugins.yaml outDir)
+Submit_volcano_workloads/result/

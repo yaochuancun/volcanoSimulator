@@ -1,11 +1,16 @@
 from common.utils.json_http_client import JsonHttpClient
+from input_config.flexnpu_util_report import print_flexnpu_utilization
+from input_config.input_config_loader import (
+    load_cluster_for_simulator,
+    load_plugins_for_simulator,
+    load_workload_for_simulator,
+)
 import time
 import datetime
 import csv
 import json
 import munch
 import os
-import shutil
 from json import dumps
 #from figures.draw_pod_figures import draw_pods_figures
 import prettytable
@@ -15,19 +20,13 @@ def _get_key_or_empty(data, key):
     pods = munch.munchify(data[key])
     return pods if pods is not None else []
 
-def reset(sim_base_url, node_file_url, workload_file_url):
+def reset(sim_base_url, nodes_yaml, workload_yaml):
     client = JsonHttpClient(sim_base_url)
-
-    with open(node_file_url, 'r', encoding='utf-8') as file:
-        nodes_file = file.read()
-
-    with open(workload_file_url, 'r', encoding='utf-8') as file:
-        workload_file = file.read()
 
     dicData = client.get_json('/reset', json={
         'period': "-1",
-        'nodes': nodes_file,
-        'workload': workload_file,
+        'nodes': nodes_yaml,
+        'workload': workload_yaml,
     })
 
     if str(dicData) == "0":
@@ -38,17 +37,15 @@ def reset(sim_base_url, node_file_url, workload_file_url):
         #print(dumps(dicData["nodes"], indent=4))
         #print(_get_key_or_empty(dicData, "nodes"))
 
-def step(sim_base_url, conf_file_url, pods_result_url, jobs_result_url):
+def step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url):
 
     client = JsonHttpClient(sim_base_url)
 
     task_headers = ["Pod_name", "Job_name", "Phase", "NodeName"]
     phase_summary_path_name = "pod_phase_count.txt"
 
-    with open(conf_file_url, 'r', encoding='utf-8') as file:  # conf2是nodeorder
-        conf_file = file.read()
     data = client.get_json('/step', json={
-        'conf': conf_file,
+        'conf': scheduler_conf_yaml,
     })
 
     wait = 0.2
@@ -117,6 +114,14 @@ def step(sim_base_url, conf_file_url, pods_result_url, jobs_result_url):
             print(summary_text)
             print(succeed_table)
 
+            flexnpu_txt = print_flexnpu_utilization(resultdata)
+            with open(
+                os.path.join(pods_result_url, "flexnpu_utilization.txt"),
+                "w",
+                encoding="utf-8",
+            ) as flex_fp:
+                flex_fp.write(flexnpu_txt)
+
             job_result = os.path.join(jobs_result_url, 'coutJCT.csv')
             with open(job_result, "w", encoding='utf-8', newline='') as file1:
                 writer1 = csv.writer(file1)
@@ -162,47 +167,34 @@ def step(sim_base_url, conf_file_url, pods_result_url, jobs_result_url):
 if __name__ == '__main__':
 
     sim_base_url = 'http://localhost:8006'
-    node_file_url = 'common/nodes/nodes_7-0.yaml'
-    workload_file_url = 'common/workloads/AI-workloads/wsl_test_mrp-2.yaml'
+    _base_dir = os.path.dirname(os.path.abspath(__file__))
+    cluster_path = os.path.join(_base_dir, 'input_config', 'cluster', 'cluster.yaml')
+    workload_path = os.path.join(_base_dir, 'input_config', 'workload', 'workload.yaml')
+    plugins_path = os.path.join(_base_dir, 'input_config', 'plugins', 'plugins.yaml')
 
-    if os.path.exists(os.path.join(os.getcwd(), "volcano-sim-result/")):
-        shutil.rmtree(os.path.join(os.getcwd(), "volcano-sim-result/"))
-    os.makedirs(os.path.join(os.getcwd(), "volcano-sim-result/"), exist_ok=False)
-    print("Delete history folder！！！\n")
+    nodes_yaml = load_cluster_for_simulator(cluster_path)
+    workload_yaml = load_workload_for_simulator(workload_path)
+    scheduler_conf_yaml, result_root = load_plugins_for_simulator(plugins_path)
 
-    for i in range(1):
-        print("**************************************************** " + str(i+1) + " test: ****************************************************")
+    now = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+    pods_result_url = os.path.join(result_root, 'tasks', now)
+    jobs_result_url = os.path.join(result_root, 'jobs', now)
+    os.makedirs(pods_result_url, exist_ok=True)
+    os.makedirs(jobs_result_url, exist_ok=True)
 
-        # schedulers = ["GANG_LRP", "GANG_MRP", "GANG_BRA", "SLA_LRP", "SLA_MRP", "SLA_BRA",
-        #               "GANG_DRF_LRP", "GANG_DRF_MRP", "GANG_DRF_BRA", "GANG_BINPACK", "SLA_BINPACK", "GANG_DRF_BINPACK"]
+    print("Cluster config:", cluster_path)
+    print("Workload config:", workload_path)
+    print("Plugins config:", plugins_path)
+    print("Result root:", result_root)
+    print()
 
-        # schedulers = ["GANG_LRP", "GANG_MRP", "GANG_BRA", "SLA_LRP", "SLA_MRP", "SLA_BRA",
-        #               "GANG_DRF_LRP", "GANG_DRF_MRP", "GANG_DRF_BRA", "GANG_BINPACK", "SLA_BINPACK", "GANG_DRF_BINPACK", "Default"]
-
-        #schedulers = ["GANG_BINPACK", "GANG_LRP", "GANG_MRP", "GANG_BRA", "DRF_BINPACK", "DRF_LRP", "DRF_MRP", "DRF_BRA", "SLA_BINPACK", "SLA_LRP", "SLA_MRP", "SLA_BRA"]
-        #schedulers = ["GANG_BINPACK", "DRF_BINPACK", "SLA_BINPACK"]
-        # schedulers = ["SLA_LRP", "SLA_MRP", "SLA_BRA", "DRF_LRP", "DRF_MRP", "DRF_BRA", "GANG_LRP", "GANG_MRP", "GANG_BRA",
-        #               "GANG_DRF_LRP", "GANG_DRF_MRP", "GANG_DRF_BRA", "GANG_DRF_BINPACK"]
-        schedulers = ["GANG_LRP", "GANG_MRP", "GANG_BRA"]
-        for scheduler in schedulers:
-            now = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-            # conf_file_url = 'common/scheduler_conf/conf_1.yaml'
-            conf_file_url = 'common/scheduler_conf_sim/' + str(scheduler) + '.yaml'
-            pods_result_url = "volcano-sim-result/tasks/" + str(now) + "-" + str(scheduler)
-            jobs_result_url = "volcano-sim-result/jobs/" + str(now) + "-" + str(scheduler)
-
-            os.makedirs(pods_result_url, exist_ok=True)
-            os.makedirs(jobs_result_url, exist_ok=True)
-
-            print("-----------------------------------------------------------------")
-            print("In scheduling algorithm: " + str(scheduler) + "， simulation test：")
-            reset(sim_base_url, node_file_url, workload_file_url)
-            time.sleep(1)
-            step(sim_base_url, conf_file_url, pods_result_url, jobs_result_url)
-            time.sleep(1)
-            #draw_pods_figures(os.path.join(pods_result_url, 'tasksSUM.csv'), figures_result_url, scheduler)
-            print("-----------------------------------------------------------------")
-            print("")
+    print("**************************************************** simulation run ****************************************************")
+    print("-----------------------------------------------------------------")
+    reset(sim_base_url, nodes_yaml, workload_yaml)
+    time.sleep(1)
+    step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url)
+    time.sleep(1)
+    print("-----------------------------------------------------------------")
 
     print("****************************************************！！！Simulation Stop！！！****************************************************")
 
