@@ -1,0 +1,3 @@
+node_name,flexnpu_core_allocated/total,flexnpu_memory_allocated/total,flexnpu_core_allocation_rate,flexnpu_memory_allocation_rate
+node-0,200/200,4/200,100.00%,2.00%
+node-1,125/800,5/4096,15.62%,0.12%
