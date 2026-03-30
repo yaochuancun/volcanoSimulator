@@ -41,6 +41,72 @@ def _fmt_scalar_cell(v: float) -> str:
     return f"{v:.4g}"
 
 
+def _task_node_name(task: Mapping[str, Any], pod: Mapping[str, Any]) -> str:
+    """Resolve node from TaskInfo (embedded TransactionContext) or Pod spec."""
+    n = task.get("NodeName") or task.get("nodeName")
+    if n:
+        return str(n)
+    ctx = task.get("TransactionContext") or task.get("transactionContext")
+    if isinstance(ctx, dict):
+        n = ctx.get("NodeName") or ctx.get("nodeName")
+        if n:
+            return str(n)
+    spec = pod.get("spec") or {}
+    n = spec.get("nodeName") or spec.get("NodeName")
+    return str(n) if n else ""
+
+
+def _is_unset_k8s_time(s: str) -> bool:
+    t = (s or "").strip()
+    return not t or t.startswith("0001-01-01") or t == "1970-01-01T00:00:00Z"
+
+
+def _pod_creation_timestamp(
+    pod: Mapping[str, Any],
+    job: Mapping[str, Any],
+    sim_clock: str,
+) -> str:
+    """Pod metadata often omits creationTimestamp (omitempty on zero Time); use fallbacks."""
+    meta = pod.get("metadata") or {}
+    raw = meta.get("creationTimestamp")
+    if raw is not None and raw != "":
+        if isinstance(raw, dict):
+            inner = raw.get("Time") or raw.get("time")
+            if inner:
+                s = str(inner)
+                if not _is_unset_k8s_time(s):
+                    return s
+        else:
+            s = str(raw).strip()
+            if not _is_unset_k8s_time(s) and s.lower() != "null":
+                return s
+    for k in meta:
+        if k.lower() == "creationtimestamp" and meta[k] not in (None, ""):
+            s = str(meta[k]).strip()
+            if not _is_unset_k8s_time(s):
+                return s
+
+    st = (pod.get("status") or {}).get("startTime")
+    if st:
+        if isinstance(st, dict):
+            st = st.get("Time") or st.get("time")
+        s = str(st).strip() if st else ""
+        if not _is_unset_k8s_time(s):
+            return s
+
+    for key in ("CreationTimestamp", "creationTimestamp"):
+        jts = job.get(key)
+        if jts is None or jts == "":
+            continue
+        if isinstance(jts, dict):
+            jts = jts.get("Time") or jts.get("time")
+        s = str(jts).strip() if jts else ""
+        if not _is_unset_k8s_time(s):
+            return s
+
+    return (sim_clock or "").strip()
+
+
 def _pod_total_flex_requests(pod: Mapping[str, Any]) -> Tuple[float, float]:
     spec = pod.get("spec") or {}
     tc, tm = 0.0, 0.0
@@ -103,6 +169,7 @@ def write_pod_desc_csv(
     jobs: Mapping[str, Any],
     pod_chip_share: Mapping[Tuple[str, str], Mapping[str, Mapping[str, float]]],
     path: str,
+    sim_clock: str = "",
 ) -> None:
     header = [
         "当前节点",
@@ -117,14 +184,18 @@ def write_pod_desc_csv(
     rows: List[List[str]] = [header]
 
     for _jid, job, _tid, task in _iter_tasks_with_pod(jobs):
+        if not isinstance(job, dict):
+            continue
         pod = task.get("Pod") or task.get("pod") or {}
         if not isinstance(pod, dict):
+            continue
+        if not isinstance(task, dict):
             continue
         status = pod.get("status") or {}
         phase = (status.get("phase") or "").strip()
         if phase not in ("Running", "Binding", "Pending"):
             continue
-        node = str(task.get("NodeName") or task.get("nodeName") or "")
+        node = _task_node_name(task, pod)
         if phase in ("Running", "Binding") and not node:
             continue
 
@@ -135,8 +206,7 @@ def write_pod_desc_csv(
             ns, pname = "default", pref
 
         req_c, req_m = _pod_total_flex_requests(pod)
-        meta = pod.get("metadata") or {}
-        created = meta.get("creationTimestamp") or ""
+        created = _pod_creation_timestamp(pod, job, sim_clock)
 
         pk = (node, pref) if node else None
         chip_json = (
@@ -226,7 +296,18 @@ def write_output_config_csvs(resultdata: Mapping[str, Any], output_dir: str) -> 
     card_used_core = snap["card_used_core"]
     pod_chip_share = snap["pod_chip_share"]
 
+    sim_clock = str(
+        resultdata.get("Clock")
+        or resultdata.get("clock")
+        or ""
+    )
+
     write_node_desc_csv(nodes, os.path.join(output_dir, "Node_desc.csv"))
-    write_pod_desc_csv(jobs, pod_chip_share, os.path.join(output_dir, "POD_desc.csv"))
+    write_pod_desc_csv(
+        jobs,
+        pod_chip_share,
+        os.path.join(output_dir, "POD_desc.csv"),
+        sim_clock=sim_clock,
+    )
     write_npu_chip_csv(nodes, card_used_core, os.path.join(output_dir, "npu_chip.csv"))
     write_summary_csv(nodes, jobs, os.path.join(output_dir, "summary.csv"))

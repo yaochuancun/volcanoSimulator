@@ -173,8 +173,8 @@ if __name__ == '__main__':
 
     sim_base_url = 'http://localhost:8006'
     _base_dir = os.path.dirname(os.path.abspath(__file__))
-    cluster_path = os.path.join(_base_dir, 'input_config', 'cluster', 'cluster.yaml')
-    workload_path = os.path.join(_base_dir, 'input_config', 'workload', 'workload.yaml')
+    cluster_path = os.path.join(_base_dir, 'input_config', 'cluster', 'cluster_1.yaml')
+    workload_path = os.path.join(_base_dir, 'input_config', 'workload', 'workload_1.yaml')
     plugins_path = os.path.join(_base_dir, 'input_config', 'plugins', 'plugins.yaml')
 
     nodes_yaml = load_cluster_for_simulator(cluster_path)
