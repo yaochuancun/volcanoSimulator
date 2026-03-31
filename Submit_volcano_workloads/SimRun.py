@@ -7,7 +7,6 @@ from input_config.input_config_loader import (
     load_workload_for_simulator,
 )
 import time
-import datetime
 import csv
 import json
 import munch
@@ -38,7 +37,7 @@ def reset(sim_base_url, nodes_yaml, workload_yaml):
         #print(dumps(dicData["nodes"], indent=4))
         #print(_get_key_or_empty(dicData, "nodes"))
 
-def step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url):
+def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
 
     client = JsonHttpClient(sim_base_url)
 
@@ -50,7 +49,6 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url):
     })
 
     wait = 0.2
-    alljoblists = []
     pending_count = 0
     running_count = 0
     other_phase_count = 0
@@ -123,18 +121,9 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url):
             ) as flex_fp:
                 flex_fp.write(flexnpu_txt)
 
-            output_config_dir = os.path.join(pods_result_url, "output_config")
-            os.makedirs(output_config_dir, exist_ok=True)
-            write_output_config_csvs(resultdata, output_config_dir)
-
-            job_result = os.path.join(jobs_result_url, 'coutJCT.csv')
-            with open(job_result, "w", encoding='utf-8', newline='') as file1:
-                writer1 = csv.writer(file1)
-                writer1.writerow(['Job Name', 'Job Completed Time(s)'])
-                writer1.writerow(['N/A', 'not applicable (pods remain Pending/Running)'])
+            write_output_config_csvs(resultdata, pods_result_url)
 
             countJct = [0]
-            alljoblists.append(['summary', 0])
             break
 
     JCT_table = prettytable.PrettyTable(['Job Name', 'Job Completed Time(s)'])
@@ -142,32 +131,7 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url):
 
     print(JCT_table)
 
-    pod_result_1 = os.path.join(pods_result_url, 'tasksSUM.md')
-    file2 = open(pod_result_1, 'w', encoding='utf-8')
-    file2.write(str(succeed_table) + "\n")
-    file2.write(f"Pending: {pending_count}  Running: {running_count}  Other: {other_phase_count}\n")
-    file2.write('Total%d个Task。\n' % (pending_count + running_count + other_phase_count))
-    if len(allpodruntime) > 0:
-        file2.write('Task average time：%.2fs，Minimum time：%.2fs，Maximum time：%.2fs。 \n' % (
-            sum(allpodruntime) / len(allpodruntime), min(allpodruntime), max(allpodruntime)))
-    else:
-        file2.write('（当前仿真不统计 task 运行时长）\n')
-
-    job_result_1 = os.path.join(jobs_result_url, 'coutJCT.md')
-    file3 = open(job_result_1, 'w', encoding='utf-8')
-    file3.write(str(JCT_table) + "\n")
-    file3.write('Summary: ' + "\n")
-    file3.write('Total%d个Job。\n' % (len(countJct)))
-    if countJct and countJct != [0]:
-        file3.write('Job average time：%.2fs，Minimum time：%.2fs，Maximum time：%.2fs。\n' % (
-            sum(countJct) / len(countJct), min(countJct), max(countJct)))
-        file3.write('Jobs MakeSpan is：%.2fs。\n' % max(countJct))
-    else:
-        file3.write('JCT 未计算（Pod 保持 Pending/Running）。\n')
-
     time.sleep(0.5)
-    file2.close()
-    file3.close()
 
 if __name__ == '__main__':
 
@@ -181,11 +145,8 @@ if __name__ == '__main__':
     workload_yaml = load_workload_for_simulator(workload_path)
     scheduler_conf_yaml, result_root = load_plugins_for_simulator(plugins_path)
 
-    now = datetime.datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
-    pods_result_url = os.path.join(result_root, 'tasks', now)
-    jobs_result_url = os.path.join(result_root, 'jobs', now)
-    os.makedirs(pods_result_url, exist_ok=True)
-    os.makedirs(jobs_result_url, exist_ok=True)
+    os.makedirs(result_root, exist_ok=True)
+    pods_result_url = result_root
 
     print("Cluster config:", cluster_path)
     print("Workload config:", workload_path)
@@ -197,7 +158,7 @@ if __name__ == '__main__':
     print("-----------------------------------------------------------------")
     reset(sim_base_url, nodes_yaml, workload_yaml)
     time.sleep(1)
-    step(sim_base_url, scheduler_conf_yaml, pods_result_url, jobs_result_url)
+    step(sim_base_url, scheduler_conf_yaml, pods_result_url)
     time.sleep(1)
     print("-----------------------------------------------------------------")
 

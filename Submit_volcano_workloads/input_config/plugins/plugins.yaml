@@ -26,6 +26,6 @@ scheduler:
           nodeMemoryWeight: 10.0
           scheduleMode: "binpack"
 output:
-  outDir: ./result/run-plugin-flexnpu-{date}
+  outDir: ./result/{date}
   formats:
     - csv

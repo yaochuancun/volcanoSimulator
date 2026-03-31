@@ -146,7 +146,7 @@ def load_plugins_for_simulator(path: str) -> Tuple[str, str]:
     conf_str = yaml.safe_dump(scheduler, sort_keys=False, allow_unicode=True)
 
     output = doc.get("output") or {}
-    out_dir = output.get("outDir") or "./result/run-plugin-flexnpu-{date}"
+    out_dir = output.get("outDir") or "./result/{date}"
     out_dir = resolve_out_dir_pattern(out_dir)
     if not os.path.isabs(out_dir):
         out_dir = os.path.normpath(os.path.join(os.getcwd(), out_dir))

@@ -18,11 +18,10 @@
   - `step`：上传调度器配置，推进调度回合。  
   - `stepResult`：拉取当前 `Jobs`、`Nodes`、Pod 列表及仿真时钟等，用于统计与报表。
 
-- **结果产物**（默认在 `plugins.yaml` 解析出的 `Submit_volcano_workloads/result/.../tasks/<时间戳>/` 等路径下）  
-  - `tasksSUM.csv` / `tasksSUM.md`、`pod_phase_count.txt`  
+- **结果产物**（默认在 `plugins.yaml` 解析出的 `Submit_volcano_workloads/result/<run 目录>/` 下，与 `tasksSUM.csv` 等平铺）  
+  - `tasksSUM.csv`、`pod_phase_count.txt`  
   - `flexnpu_utilization.txt`：节点级 FlexNPU 利用率、逐卡估算、Pod→卡映射说明  
-  - `output_config/`：`Node_desc.csv`、`POD_desc.csv`、`npu_chip.csv`、`summary.csv`  
-  - `jobs/` 目录下 JCT 相关占位输出（`.csv` / `.md`）
+  - `Node_desc.csv`、`POD_desc.csv`、`npu_chip.csv`、`summary.csv`（与上述同目录）  
 
 - **Python 辅助模块**（`Submit_volcano_workloads/input_config/` 包）  
   - `input_config_loader`：将上述 YAML 转为仿真器期望的 `cluster` / `jobs` / scheduler conf 格式。  
@@ -59,7 +58,7 @@
   1. Loader 读 `cluster` / `workload` / `plugins`，生成仿真器可消费的 YAML 字符串。  
   2. `reset` 将节点、负载写入仿真器内存。  
   3. `step` 加载 scheduler 配置并执行调度。  
-  4. `stepResult` 返回快照；Python 写盘并生成 FlexNPU 与 `output_config` 报表。
+  4. `stepResult` 返回快照；Python 写盘并生成 FlexNPU 与 CSV 报表。
 
 - **其他目录**  
   - `Submit_volcano_workloads/common/`：如 `JsonHttpClient` 等通用工具（新特性优先放在 `input_config/`，见 `input_config/__init__.py` 说明）。  
@@ -104,7 +103,7 @@ python SimRun.py
 
 - 在 **`Submit_volcano_workloads/SimRun.py`** 的 `if __name__ == '__main__':` 中修改：  
   `cluster_path`、`workload_path`、`plugins_path`（例如 `cluster_1.yaml`、`workload_1.yaml` 等）。  
-- 结果根目录由 **`Submit_volcano_workloads/input_config/plugins/*.yaml`** 的 `output.outDir` 决定（支持 `{date}`）；其下会创建 `tasks/<时间戳>/`、`jobs/<时间戳>/` 等。
+- 结果根目录由 **`Submit_volcano_workloads/input_config/plugins/*.yaml`** 的 `output.outDir` 决定（支持 `{date}`）；产物直接写入该目录，不再建 `tasks/<时间戳>/` 或 `statistics/` 子目录。
 
 ### 5. 说明与校验
 
