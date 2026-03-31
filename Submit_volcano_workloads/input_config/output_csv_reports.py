@@ -1,4 +1,4 @@
-"""Emit Node_desc.csv, POD_desc.csv, npu_chip.csv, summary.csv (layout matches output_config samples)."""
+"""Emit Node_desc.csv, POD_desc.csv, npu_chip.csv, summary.csv under a run's output_config/ directory."""
 
 from __future__ import annotations
 

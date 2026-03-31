@@ -21,7 +21,7 @@
 - **结果产物**（默认在 `plugins.yaml` 解析出的 `Submit_volcano_workloads/result/.../tasks/<时间戳>/` 等路径下）  
   - `tasksSUM.csv` / `tasksSUM.md`、`pod_phase_count.txt`  
   - `flexnpu_utilization.txt`：节点级 FlexNPU 利用率、逐卡估算、Pod→卡映射说明  
-  - `output_config/`：`Node_desc.csv`、`POD_desc.csv`、`npu_chip.csv`、`summary.csv`（与 `Submit_volcano_workloads/output_config/` 下样例列结构一致）  
+  - `output_config/`：`Node_desc.csv`、`POD_desc.csv`、`npu_chip.csv`、`summary.csv`  
   - `jobs/` 目录下 JCT 相关占位输出（`.csv` / `.md`）
 
 - **Python 辅助模块**（`Submit_volcano_workloads/input_config/` 包）  
