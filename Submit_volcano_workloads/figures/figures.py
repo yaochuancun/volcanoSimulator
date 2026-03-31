@@ -1,3 +1,5 @@
+"""调度实验结果绘图入口：从多组结果目录读取 JCT/Makespan，绘制箱线图、柱状图等并保存。"""
+
 import datetime
 import os
 
@@ -10,6 +12,7 @@ from .jct_avg import draw_jct_avg
 
 
 def _plot_style_context():
+    """若已安装 scienceplots 且存在 ieee 样式则启用，否则使用 matplotlib 默认样式。"""
     try:
         import scienceplots  # noqa: F401
     except ImportError:
@@ -32,7 +35,6 @@ drl_name = 'DRL'
 #    summary['name'] = summary['name'].map(convert_name)
 
 
-# 绘制makespan柱状图，JCT盒图，以及JCT的CDF
 def draw_job_figures(
         root_dir: str,
         save_dir: str,
@@ -40,6 +42,7 @@ def draw_job_figures(
         save_filename: str = None,
         show_figure: bool = True,
 ):
+    """读取 ``root_dir`` 下各算法子目录，绘制 JCT 箱线图并保存为 PDF。"""
     with _plot_style_context():
         now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
         save_filename = save_filename or root_dir.replace('/', '_') + now + ".pdf"
@@ -94,6 +97,7 @@ def draw_job_figures1(
         save_filename: str = None,
         show_figure: bool = True,
 ):
+    """与 draw_job_figures 类似，但主图改为平均 JCT 柱状图。"""
     with _plot_style_context():
         now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
         save_filename = save_filename or root_dir.replace('/', '_') + now + ".pdf"
@@ -147,6 +151,7 @@ def draw_job_figures2(
         save_filename: str = None,
         show_figure: bool = True,
 ):
+    """绘制 Makespan 柱状图并保存为 PNG；可将 DRL 算法排在图例首位。"""
     with _plot_style_context():
         now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
         save_filename = save_filename or root_dir.replace('/', '_') + now + ".png"
@@ -195,5 +200,6 @@ def draw_job_figures2(
         plt.show(block = True)
 
 def list_dir(root_dir: str):
+    """列出 ``root_dir`` 下所有子目录的完整路径。"""
     dirs = os.listdir(root_dir)
     return [os.path.join(root_dir, d) for d in dirs if os.path.isdir(os.path.join(root_dir, d))]

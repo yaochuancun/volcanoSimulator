@@ -1,4 +1,7 @@
-"""Emit Node_desc.csv, POD_desc.csv, npu_chip.csv, summary.csv into a run output directory (flat layout)."""
+"""根据 stepResult 快照生成四类统计 CSV，写入同一次仿真的输出目录（平铺，无子目录）。
+
+文件：Node_desc.csv、POD_desc.csv、npu_chip.csv、summary.csv。
+"""
 
 from __future__ import annotations
 
@@ -42,7 +45,7 @@ def _fmt_scalar_cell(v: float) -> str:
 
 
 def _task_node_name(task: Mapping[str, Any], pod: Mapping[str, Any]) -> str:
-    """Resolve node from TaskInfo (embedded TransactionContext) or Pod spec."""
+    """从 Task 或内嵌 TransactionContext、Pod spec 解析节点名。"""
     n = task.get("NodeName") or task.get("nodeName")
     if n:
         return str(n)
@@ -66,7 +69,7 @@ def _pod_creation_timestamp(
     job: Mapping[str, Any],
     sim_clock: str,
 ) -> str:
-    """Pod metadata often omits creationTimestamp (omitempty on zero Time); use fallbacks."""
+    """Pod 元数据常省略 creationTimestamp；依次尝试 status、Job 时间、仿真时钟等回退。"""
     meta = pod.get("metadata") or {}
     raw = meta.get("creationTimestamp")
     if raw is not None and raw != "":
@@ -133,6 +136,7 @@ def _chip_json_core(chip_share: Mapping[str, Mapping[str, float]]) -> str:
 
 
 def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
+    """写节点级 FlexNPU 已分配/总量与分配率。"""
     rows: List[List[str]] = [
         [
             "node_name",
@@ -171,6 +175,7 @@ def write_pod_desc_csv(
     path: str,
     sim_clock: str = "",
 ) -> None:
+    """写 Running/Binding/Pending Pod 的描述行（含 flex 请求、创建时间、占卡 JSON）。"""
     header = [
         "当前节点",
         "命名空间",
@@ -241,6 +246,7 @@ def write_npu_chip_csv(
     card_used_core: Mapping[Tuple[str, str], float],
     path: str,
 ) -> None:
+    """按节点、按卡写入估算利用率（基于注解容量与 estimate_card_usage 结果）。"""
     rows: List[List[str]] = [["节点名称", "卡名", "利用率"]]
     for nname in sorted(nodes.keys()):
         ninfo = nodes[nname]
@@ -266,6 +272,7 @@ def write_summary_csv(
     jobs: Mapping[str, Any],
     path: str,
 ) -> None:
+    """汇总节点数与 Running/Binding、Pending Pod 数量。"""
     node_count = len([k for k, v in nodes.items() if isinstance(v, dict)])
     run_c = 0
     pend_c = 0
@@ -286,7 +293,7 @@ def write_summary_csv(
 
 
 def write_output_config_csvs(resultdata: Mapping[str, Any], output_dir: str) -> None:
-    """Write the four CSV files into ``output_dir`` (created if missing)."""
+    """在 ``output_dir`` 下写入上述四个 CSV（目录不存在则创建）；无有效快照时直接返回。"""
     os.makedirs(output_dir, exist_ok=True)
     snap = compute_flexnpu_snapshot(resultdata)
     if snap is None:

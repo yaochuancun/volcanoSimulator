@@ -1,3 +1,5 @@
+"""JCT 箱线图：matplotlib / seaborn 多种画法。"""
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
@@ -8,6 +10,7 @@ def draw_jct_box(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
+    """按算法分组绘制 Job Completed Time 箱线图（matplotlib boxplot）。"""
     data = []
     for an in algorithm_names:
         df = data_frame[data_frame['name'] == an]
@@ -35,6 +38,7 @@ def draw_jct_box_modify(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
+    """使用 seaborn 风格的箱线图（示例）。"""
     data = []
     for an in algorithm_names:
         df = data_frame[data_frame['name'] == an]
@@ -59,6 +63,7 @@ def draw_jct_box_1(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
+    """将各算法 JCT 列拼成宽表后用 DataFrame.boxplot 绘制，并自定义箱体颜色。"""
 
     frame1 = pd.DataFrame()
     for an in algorithm_names:

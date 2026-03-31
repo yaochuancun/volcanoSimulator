@@ -1,3 +1,9 @@
+"""Volcano 仿真器客户端入口：通过 HTTP 调用 /reset、/step、/stepResult，并将结果写入本地目录。
+
+配置来自 input_config 下的 cluster / workload / plugins YAML；产物（CSV、FlexNPU 报表等）
+写入 plugins 中 output.outDir 解析后的路径。
+"""
+
 from common.utils.json_http_client import JsonHttpClient
 from input_config.flexnpu_util_report import print_flexnpu_utilization
 from input_config.output_csv_reports import write_output_config_csvs
@@ -17,10 +23,13 @@ import prettytable
 
 
 def _get_key_or_empty(data, key):
+    """从响应字典取 key，转为 munch 对象；缺失或 None 时返回空列表。"""
     pods = munch.munchify(data[key])
     return pods if pods is not None else []
 
+
 def reset(sim_base_url, nodes_yaml, workload_yaml):
+    """调用仿真器 /reset，下发节点与作业负载 YAML，初始化一次仿真环境。"""
     client = JsonHttpClient(sim_base_url)
 
     dicData = client.get_json('/reset', json={
@@ -38,7 +47,9 @@ def reset(sim_base_url, nodes_yaml, workload_yaml):
         #print(_get_key_or_empty(dicData, "nodes"))
 
 def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
-
+    """调用 /step 推进调度，轮询 /stepResult 直至有有效快照；将 Pod 列表、阶段统计、
+    FlexNPU 利用率及统计 CSV 写入 ``pods_result_url`` 目录。
+    """
     client = JsonHttpClient(sim_base_url)
 
     task_headers = ["Pod_name", "Job_name", "Phase", "NodeName"]
@@ -56,7 +67,7 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
     succeed_table = prettytable.PrettyTable(task_headers)
     countJct = [0]
     while True:
-        # 等待一段时间后获取集群信息，若返回1则表示集群未调度满一个周期，再等等
+        # 等待后拉取集群快照；若仍为 '0' 表示本周期尚未结束，继续轮询
         time.sleep(wait)
         resultdata = client.get_json('/stepResult', json={
             'none': "",
@@ -134,6 +145,7 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
     time.sleep(0.5)
 
 if __name__ == '__main__':
+    # 默认连本地仿真服务；结果目录由 plugins.yaml 的 output.outDir（含 {date}）决定
 
     sim_base_url = 'http://localhost:8006'
     _base_dir = os.path.dirname(os.path.abspath(__file__))

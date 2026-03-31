@@ -1,4 +1,8 @@
-"""Print flexnpu core/memory utilization per node and per NPU card from simulator stepResult JSON."""
+"""根据仿真器 ``stepResult`` JSON，汇总并打印 FlexNPU 算力/显存利用率（按节点、按卡），
+以及 Pod 到 NPU 卡的估算分配（结合 flexnpu-num 与容器 request，在节点内轮询分卡）。
+
+供控制台输出与写入 ``flexnpu_utilization.txt`` 使用；``compute_flexnpu_snapshot`` 亦被 CSV 报表复用。
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ import json
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping, Optional, Set, Tuple
 
+# FlexNPU 资源在 Pod spec 与 Node 注解中使用的键名
 CORE_RES = "volcano.sh/flexnpu-core.percentage"
 MEM_RES = "volcano.sh/flexnpu-memory.128mi"
 FLEXNPU_NUM_ANN = "volcano.sh/flexnpu-num"
@@ -128,6 +133,7 @@ def estimate_card_usage(
     Dict[Tuple[str, str], Dict[str, Any]],
     Dict[Tuple[str, str], Dict[str, Dict[str, float]]],
 ]:
+    """对 Running/Binding 的 Pod，按容器 request 与 flexnpu-num 将用量摊到各卡（节点内轮询）。"""
     used_core: Dict[Tuple[str, str], float] = defaultdict(float)
     used_mem: Dict[Tuple[str, str], float] = defaultdict(float)
     rr: Dict[str, int] = defaultdict(int)
@@ -195,7 +201,7 @@ def estimate_card_usage(
 
 
 def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """Build node card ids and per-card / per-pod flexnpu estimates from stepResult."""
+    """从 stepResult 构建节点卡列表、每卡用量估计、Pod 绑卡等信息；无有效 Nodes 时返回 None。"""
     nodes = resultdata.get("Nodes") or resultdata.get("nodes") or {}
     jobs = resultdata.get("Jobs") or resultdata.get("jobs") or {}
     if not isinstance(nodes, dict):
@@ -224,6 +230,7 @@ def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str
 
 
 def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
+    """生成多段文本报告（节点汇总、Pod→卡、逐卡利用率），供写文件或打印。"""
     lines: List[str] = []
     snap = compute_flexnpu_snapshot(resultdata)
     if snap is None:
@@ -300,6 +307,7 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
 
 
 def print_flexnpu_utilization(resultdata: Mapping[str, Any]) -> str:
+    """格式化报告并打印到标准输出，同时返回字符串供调用方写入文件。"""
     text = format_flexnpu_report(resultdata)
     print(text, end="")
     return text

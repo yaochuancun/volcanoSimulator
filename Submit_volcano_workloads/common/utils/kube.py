@@ -1,4 +1,9 @@
 # coding=utf-8
+"""Kubernetes Pod/Node 辅助函数：从 client.V1Pod 或仿真 JSON 形态对象读取时间、资源、标签与调度信息。
+
+同时兼容官方 Python 客户端的蛇形命名与部分仿真返回的驼峰字段。
+"""
+
 import datetime
 
 from dateutil import tz
@@ -6,7 +11,7 @@ from kubernetes import client, utils
 
 from .. import consts
 
-GB = 1024 ** 3
+GB = 1024 ** 3  # 字节转 GiB 用
 
 
 def get_obj_uid(obj):
@@ -28,7 +33,7 @@ def get_pod_node_name(pod: client.V1Pod) -> str:
         return pod.spec.nodeName
 
 
-# from submit pod to start pod
+# 自 Pod 创建到容器开始运行（排队等待时长，秒）
 def get_pod_waiting_time(pod: client.V1Pod) -> float:
     created_at = get_pod_creation_timestamp(pod)
     started_at = get_pod_start_time(pod)
@@ -38,7 +43,7 @@ def get_pod_waiting_time(pod: client.V1Pod) -> float:
     return pod_wait_time1
 
 
-# from submit pod to create pod
+# 自 Pod 创建到被 kubelet 接纳（调度/拉取镜像前）
 def get_pod_beenscheduled_time(pod: client.V1Pod) -> float:
     created_at = get_pod_creation_timestamp(pod)
     started_at = get_pod_acknowledged_by_kubelet_time(pod)
@@ -48,7 +53,7 @@ def get_pod_beenscheduled_time(pod: client.V1Pod) -> float:
     return pod_wait_time2
 
 
-# from create pod to start pod
+# 自 kubelet 接纳到容器真正开始运行
 def get_pod_excutedwaiting_time(pod: client.V1Pod) -> float:
     created_at = get_pod_acknowledged_by_kubelet_time(pod)
     started_at = get_pod_start_time(pod)
@@ -93,8 +98,8 @@ def get_pod_start_time(pod: client.V1Pod) -> datetime:
 
 def get_pod_finish_time(pod: client.V1Pod) -> datetime:
     try:
-        # print(type(pod.status.containerStatuses[0].state.terminated.finishedAt))
-        return datetime.datetime.strptime(pod.status.containerStatuses[0].state.terminated.finishedAt, "%Y-%m-%dT%H:%M:%SZ") #str类型，需转datetime，之后用于并比较
+        # 仿真侧为字符串，需解析为 datetime 以便与时间比较
+        return datetime.datetime.strptime(pod.status.containerStatuses[0].state.terminated.finishedAt, "%Y-%m-%dT%H:%M:%SZ")
     except AttributeError:
         return sim_clock_to_datetime(pod.status.containerStatuses[0].state.terminated.finishedAtString)
 
@@ -282,6 +287,7 @@ def convert_node_type_to_index(node_type: str):
 
 
 def sim_str_to_datetime(string: str):
+    """解析仿真器返回的多种时间字符串格式为 datetime（含时区偏移处理）。"""
     try:
         return datetime.datetime.strptime(string, '%Y-%m-%dT%H:%M:%SZ') + datetime.timedelta(hours=8)
     except:
@@ -292,4 +298,5 @@ def sim_str_to_datetime(string: str):
 
 
 def sim_clock_to_datetime(clock_str):
+    """将仿真时钟字符串转为 naive UTC datetime（去掉 tzinfo）。"""
     return sim_str_to_datetime(clock_str).astimezone(tz.tzutc()).replace(tzinfo=None)

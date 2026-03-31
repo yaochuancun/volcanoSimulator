@@ -1,9 +1,12 @@
+"""按算法绘制平均 JCT 柱状图（带柱顶标注）。"""
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 
 def auto_label(rects):
+    """在柱状图柱顶标注数值。"""
     for rect in rects:
         height = rect.get_height()
         #plt.text(rect.get_x() + rect.get_width() / 2. - 0.15, 1.01 * height, str(int(height)), fontsize=4)
@@ -15,6 +18,7 @@ def draw_jct_avg(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
+    """对 summary 中各算法的 mean(jct) 画柱状图。"""
     means = []
     for an in algorithm_names:
         df = data_frame[data_frame['name'] == an]
