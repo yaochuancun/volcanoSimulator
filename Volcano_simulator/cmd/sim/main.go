@@ -22,6 +22,9 @@ import (
 	"volcano.sh/volcano/pkg/simulator"
 )
 
+// port：仿真 HTTP 监听地址（与 Submit_volcano_workloads 中 SimRun 默认 URL 端口一致）。
+var port = ":8006"
+
 var (
 	loadNewSchedulerConf = true      //用于标记是否已经接收到新的schedulerConf
 	notCompletion        = false     //用于表示是否所有job都完成了
@@ -45,7 +48,6 @@ var (
 	})
 	defaultQueue *scheduling.Queue //k8s中的queue
 
-	startSimulate  time.Time
 	simulationTime time.Time
 )
 
@@ -511,7 +513,6 @@ func step(w http.ResponseWriter, r *http.Request) {
 
 	loadNewSchedulerConf = true
 
-	startSimulate = time.Now()
 	simulationTime = time.Time{}
 
 	w.Write([]byte(`1`))
@@ -587,5 +588,5 @@ func server() {
 	// 处理stepResult请求
 	http.HandleFunc("/stepResultAnyway", stepResultAnyway)
 	// 设置监听端口，等待响应
-	http.ListenAndServe(":8006", nil)
+	http.ListenAndServe(port, nil)
 }

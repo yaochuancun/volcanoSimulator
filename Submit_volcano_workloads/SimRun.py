@@ -14,10 +14,8 @@ from input_config.input_config_loader import (
 )
 import time
 import csv
-import json
 import munch
 import os
-from json import dumps
 #from figures.draw_pod_figures import draw_pods_figures
 import prettytable
 
@@ -55,7 +53,7 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
     task_headers = ["Pod_name", "Job_name", "Phase", "NodeName"]
     phase_summary_path_name = "pod_phase_count.txt"
 
-    data = client.get_json('/step', json={
+    client.get_json('/step', json={
         'conf': scheduler_conf_yaml,
     })
 
@@ -63,9 +61,7 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
     pending_count = 0
     running_count = 0
     other_phase_count = 0
-    allpodruntime = []
     succeed_table = prettytable.PrettyTable(task_headers)
-    countJct = [0]
     while True:
         # 等待后拉取集群快照；若仍为 '0' 表示本周期尚未结束，继续轮询
         time.sleep(wait)
@@ -134,7 +130,6 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
 
             write_output_config_csvs(resultdata, pods_result_url)
 
-            countJct = [0]
             break
 
     JCT_table = prettytable.PrettyTable(['Job Name', 'Job Completed Time(s)'])

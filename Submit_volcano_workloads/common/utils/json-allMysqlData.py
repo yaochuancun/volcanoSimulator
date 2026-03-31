@@ -37,14 +37,9 @@ def read_sql_file(cursor):
         podlist['job.tasks'] = []
         for j, row2 in enumerate(result2):
 
-            # 解析实例行字段
-            jobname = row2[2]
-            instance_starttime = int(row2[5])
-            instance_endtime = int(row2[6])
+            # 解析实例行字段（仅筛选条件用到的列）
             request_cpu = int(row2[10])
-            limit_cpu = int(row2[11])
             request_mem = float(row2[12])
-            limit_mem = float(row2[13])
 
             # 示例筛选：中高 CPU 请求 + 低内存
             if (request_cpu >= 100 and request_cpu < 150) and (request_mem < 0.1):

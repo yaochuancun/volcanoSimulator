@@ -24,39 +24,14 @@ import (
 	"volcano.sh/volcano/pkg/scheduler/plugins/extender"
 	"volcano.sh/volcano/pkg/scheduler/plugins/gang"
 	"volcano.sh/volcano/pkg/scheduler/plugins/nodeorder"
-	"volcano.sh/volcano/pkg/scheduler/plugins/numaaware"
 	"volcano.sh/volcano/pkg/scheduler/plugins/overcommit"
 	"volcano.sh/volcano/pkg/scheduler/plugins/predicates"
 	"volcano.sh/volcano/pkg/scheduler/plugins/priority"
 	"volcano.sh/volcano/pkg/scheduler/plugins/proportion"
 	"volcano.sh/volcano/pkg/scheduler/plugins/reservation"
 	"volcano.sh/volcano/pkg/scheduler/plugins/sla"
-	tasktopology "volcano.sh/volcano/pkg/scheduler/plugins/task-topology"
 	"volcano.sh/volcano/pkg/scheduler/plugins/tdm"
 )
-
-func initV0() {
-	// Plugins for Jobs
-	framework.RegisterPluginBuilder(drf.PluginName, drf.New)
-	framework.RegisterPluginBuilder(gang.PluginName, gang.New)
-	framework.RegisterPluginBuilder(predicates.PluginName, predicates.New)
-	framework.RegisterPluginBuilder(priority.PluginName, priority.New)
-	framework.RegisterPluginBuilder(nodeorder.PluginName, nodeorder.New)
-	framework.RegisterPluginBuilder(conformance.PluginName, conformance.New)
-	framework.RegisterPluginBuilder(binpack.PluginName, binpack.New)
-	framework.RegisterPluginBuilder(reservation.PluginName, reservation.New)
-	framework.RegisterPluginBuilder(tdm.PluginName, tdm.New)
-	framework.RegisterPluginBuilder(overcommit.PluginName, overcommit.New)
-	framework.RegisterPluginBuilder(sla.PluginName, sla.New)
-	framework.RegisterPluginBuilder(tasktopology.PluginName, tasktopology.New)
-	framework.RegisterPluginBuilder(numaaware.PluginName, numaaware.New)
-
-	// Plugins for Queues
-	framework.RegisterPluginBuilder(proportion.PluginName, proportion.New)
-
-	// Plugins for Extender
-	framework.RegisterPluginBuilder(extender.PluginName, extender.New)
-}
 
 func init() {
 	// Plugins for Jobs
@@ -71,8 +46,6 @@ func init() {
 	framework.RegisterPluginBuilder(tdm.PluginName, tdm.New)
 	framework.RegisterPluginBuilder(overcommit.PluginName, overcommit.New)
 	framework.RegisterPluginBuilder(sla.PluginName, sla.New)
-	//framework.RegisterPluginBuilder(tasktopology.PluginName, tasktopology.New)
-	//framework.RegisterPluginBuilder(numaaware.PluginName, numaaware.New)
 
 	// Plugins for Queues
 	framework.RegisterPluginBuilder(proportion.PluginName, proportion.New)

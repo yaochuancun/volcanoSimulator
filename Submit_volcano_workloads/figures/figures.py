@@ -5,7 +5,7 @@ import os
 
 from matplotlib import pyplot as plt
 
-from .jct_box import draw_jct_box, draw_jct_box_modify, draw_jct_box_1
+from .jct_box import draw_jct_box
 from .job_data_reading import read_data_from_directories
 from .makespan import draw_makespan
 from .jct_avg import draw_jct_avg

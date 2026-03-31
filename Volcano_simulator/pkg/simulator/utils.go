@@ -53,17 +53,6 @@ type Info struct {
 	Clock          string `json:"clock"`
 }
 
-
-func json2Job(jsonJob []byte) (error, *batch.Job)  {
-	var job *batch.Job
-	err := json.Unmarshal(jsonJob, &job) //json格式推荐使用Gi（memory，500Gi = 500GiB = 500 * 1024 * 1024 * 1024）和m（cpu，500m = 0.5 cores），
-	return err,job
-}
-func json2Node(jsonNode []byte) (error, *v1.Node)  {
-	var node *v1.Node
-	err := json.Unmarshal(jsonNode, &node)
-	return err,node
-}
 func Yaml2Nodes(yamlNodes []byte) (error, map[string][]*V2Node)  {
 	detail := make(map[string][]*V2Node)
 	jsond, err := yaml.YAMLToJSON([]byte(yamlNodes)) //jsond是一个yaml.Marshal后的string,转成json的 []byte
