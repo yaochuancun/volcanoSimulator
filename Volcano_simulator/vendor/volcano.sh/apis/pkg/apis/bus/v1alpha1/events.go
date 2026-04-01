@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 // Event represent the phase of Job, e.g. pod-failed.
+// +kubebuilder:validation:Enum=*;PodPending;PodRunning;PodFailed;PodEvicted;Unknown;TaskCompleted;OutOfSync;CommandIssued;JobUpdated;TaskFailed
 type Event string
 
 const (
@@ -29,6 +30,12 @@ const (
 
 	// PodEvictedEvent is triggered if Pod was deleted
 	PodEvictedEvent Event = "PodEvicted"
+
+	// PodPendingEvent is triggered if Pod was pending
+	PodPendingEvent Event = "PodPending"
+
+	// PodRunningEvent is triggered if Pod was running
+	PodRunningEvent Event = "PodRunning"
 
 	// JobUnknownEvent These below are several events can lead to job 'Unknown'
 	// 1. Task Unschedulable, this is triggered when part of

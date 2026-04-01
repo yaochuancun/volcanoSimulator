@@ -21,7 +21,7 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
-	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
+	"k8s.io/utils/cpuset"
 
 	nodeinfov1alpha1 "volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1"
 )
@@ -217,7 +217,7 @@ func GenerateNumaNodes(nodes map[string]*NodeInfo) map[string][]int {
 			continue
 		}
 
-		nodeNumaMap[node.Name] = node.NumaSchedulerInfo.CPUDetail.NUMANodes().ToSlice()
+		nodeNumaMap[node.Name] = node.NumaSchedulerInfo.CPUDetail.NUMANodes().List()
 	}
 
 	return nodeNumaMap

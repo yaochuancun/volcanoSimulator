@@ -129,6 +129,15 @@ func (s *Snapshot) HavePodsWithRequiredAntiAffinityList() ([]*framework.NodeInfo
 	return s.havePodsWithRequiredAntiAffinityNodeInfoList, nil
 }
 
+type emptyStorageInfoLister struct{}
+
+func (emptyStorageInfoLister) IsPVCUsedByPods(string) bool { return false }
+
+// StorageInfos implements framework.SharedLister for Kubernetes 1.31+.
+func (s *Snapshot) StorageInfos() framework.StorageInfoLister {
+	return emptyStorageInfoLister{}
+}
+
 // Get returns the NodeInfo of the given node name.
 func (s *Snapshot) Get(nodeName string) (*framework.NodeInfo, error) {
 	if v, ok := s.nodeInfoMap[nodeName]; ok && v.Node() != nil {

@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Volcano Authors.
+Copyright The Volcano Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,14 +18,14 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"context"
-	"time"
+	context "context"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	types "k8s.io/apimachinery/pkg/types"
 	watch "k8s.io/apimachinery/pkg/watch"
-	rest "k8s.io/client-go/rest"
-	v1alpha1 "volcano.sh/apis/pkg/apis/bus/v1alpha1"
+	gentype "k8s.io/client-go/gentype"
+	busv1alpha1 "volcano.sh/apis/pkg/apis/bus/v1alpha1"
+	applyconfigurationbusv1alpha1 "volcano.sh/apis/pkg/client/applyconfiguration/bus/v1alpha1"
 	scheme "volcano.sh/apis/pkg/client/clientset/versioned/scheme"
 )
 
@@ -37,141 +37,33 @@ type CommandsGetter interface {
 
 // CommandInterface has methods to work with Command resources.
 type CommandInterface interface {
-	Create(ctx context.Context, command *v1alpha1.Command, opts v1.CreateOptions) (*v1alpha1.Command, error)
-	Update(ctx context.Context, command *v1alpha1.Command, opts v1.UpdateOptions) (*v1alpha1.Command, error)
+	Create(ctx context.Context, command *busv1alpha1.Command, opts v1.CreateOptions) (*busv1alpha1.Command, error)
+	Update(ctx context.Context, command *busv1alpha1.Command, opts v1.UpdateOptions) (*busv1alpha1.Command, error)
 	Delete(ctx context.Context, name string, opts v1.DeleteOptions) error
 	DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error
-	Get(ctx context.Context, name string, opts v1.GetOptions) (*v1alpha1.Command, error)
-	List(ctx context.Context, opts v1.ListOptions) (*v1alpha1.CommandList, error)
+	Get(ctx context.Context, name string, opts v1.GetOptions) (*busv1alpha1.Command, error)
+	List(ctx context.Context, opts v1.ListOptions) (*busv1alpha1.CommandList, error)
 	Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error)
-	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.Command, err error)
+	Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *busv1alpha1.Command, err error)
+	Apply(ctx context.Context, command *applyconfigurationbusv1alpha1.CommandApplyConfiguration, opts v1.ApplyOptions) (result *busv1alpha1.Command, err error)
 	CommandExpansion
 }
 
 // commands implements CommandInterface
 type commands struct {
-	client rest.Interface
-	ns     string
+	*gentype.ClientWithListAndApply[*busv1alpha1.Command, *busv1alpha1.CommandList, *applyconfigurationbusv1alpha1.CommandApplyConfiguration]
 }
 
 // newCommands returns a Commands
 func newCommands(c *BusV1alpha1Client, namespace string) *commands {
 	return &commands{
-		client: c.RESTClient(),
-		ns:     namespace,
+		gentype.NewClientWithListAndApply[*busv1alpha1.Command, *busv1alpha1.CommandList, *applyconfigurationbusv1alpha1.CommandApplyConfiguration](
+			"commands",
+			c.RESTClient(),
+			scheme.ParameterCodec,
+			namespace,
+			func() *busv1alpha1.Command { return &busv1alpha1.Command{} },
+			func() *busv1alpha1.CommandList { return &busv1alpha1.CommandList{} },
+		),
 	}
-}
-
-// Get takes name of the command, and returns the corresponding command object, and an error if there is any.
-func (c *commands) Get(ctx context.Context, name string, options v1.GetOptions) (result *v1alpha1.Command, err error) {
-	result = &v1alpha1.Command{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("commands").
-		Name(name).
-		VersionedParams(&options, scheme.ParameterCodec).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// List takes label and field selectors, and returns the list of Commands that match those selectors.
-func (c *commands) List(ctx context.Context, opts v1.ListOptions) (result *v1alpha1.CommandList, err error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	result = &v1alpha1.CommandList{}
-	err = c.client.Get().
-		Namespace(c.ns).
-		Resource("commands").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Watch returns a watch.Interface that watches the requested commands.
-func (c *commands) Watch(ctx context.Context, opts v1.ListOptions) (watch.Interface, error) {
-	var timeout time.Duration
-	if opts.TimeoutSeconds != nil {
-		timeout = time.Duration(*opts.TimeoutSeconds) * time.Second
-	}
-	opts.Watch = true
-	return c.client.Get().
-		Namespace(c.ns).
-		Resource("commands").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Watch(ctx)
-}
-
-// Create takes the representation of a command and creates it.  Returns the server's representation of the command, and an error, if there is any.
-func (c *commands) Create(ctx context.Context, command *v1alpha1.Command, opts v1.CreateOptions) (result *v1alpha1.Command, err error) {
-	result = &v1alpha1.Command{}
-	err = c.client.Post().
-		Namespace(c.ns).
-		Resource("commands").
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(command).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Update takes the representation of a command and updates it. Returns the server's representation of the command, and an error, if there is any.
-func (c *commands) Update(ctx context.Context, command *v1alpha1.Command, opts v1.UpdateOptions) (result *v1alpha1.Command, err error) {
-	result = &v1alpha1.Command{}
-	err = c.client.Put().
-		Namespace(c.ns).
-		Resource("commands").
-		Name(command.Name).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(command).
-		Do(ctx).
-		Into(result)
-	return
-}
-
-// Delete takes name of the command and deletes it. Returns an error if one occurs.
-func (c *commands) Delete(ctx context.Context, name string, opts v1.DeleteOptions) error {
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("commands").
-		Name(name).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// DeleteCollection deletes a collection of objects.
-func (c *commands) DeleteCollection(ctx context.Context, opts v1.DeleteOptions, listOpts v1.ListOptions) error {
-	var timeout time.Duration
-	if listOpts.TimeoutSeconds != nil {
-		timeout = time.Duration(*listOpts.TimeoutSeconds) * time.Second
-	}
-	return c.client.Delete().
-		Namespace(c.ns).
-		Resource("commands").
-		VersionedParams(&listOpts, scheme.ParameterCodec).
-		Timeout(timeout).
-		Body(&opts).
-		Do(ctx).
-		Error()
-}
-
-// Patch applies the patch and returns the patched command.
-func (c *commands) Patch(ctx context.Context, name string, pt types.PatchType, data []byte, opts v1.PatchOptions, subresources ...string) (result *v1alpha1.Command, err error) {
-	result = &v1alpha1.Command{}
-	err = c.client.Patch(pt).
-		Namespace(c.ns).
-		Resource("commands").
-		Name(name).
-		SubResource(subresources...).
-		VersionedParams(&opts, scheme.ParameterCodec).
-		Body(data).
-		Do(ctx).
-		Into(result)
-	return
 }

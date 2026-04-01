@@ -24,6 +24,7 @@ import (
 	utilFeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
+	klogv2 "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	k8sframework "k8s.io/kubernetes/pkg/scheduler/framework"
@@ -91,25 +92,25 @@ type priorityWeight struct {
 //
 // User should specify priority weights in the config in this format:
 //
-//  actions: "reclaim, allocate, backfill, preempt"
-//  tiers:
-//  - plugins:
-//    - name: priority
-//    - name: gang
-//    - name: conformance
-//  - plugins:
-//    - name: drf
-//    - name: predicates
-//    - name: proportion
-//    - name: nodeorder
-//      arguments:
-//        leastrequested.weight: 1
-//        mostrequested.weight: 0
-//        nodeaffinity.weight: 1
-//        podaffinity.weight: 1
-//        balancedresource.weight: 1
-//        tainttoleration.weight: 1
-//        imagelocality.weight: 1
+//	actions: "reclaim, allocate, backfill, preempt"
+//	tiers:
+//	- plugins:
+//	  - name: priority
+//	  - name: gang
+//	  - name: conformance
+//	- plugins:
+//	  - name: drf
+//	  - name: predicates
+//	  - name: proportion
+//	  - name: nodeorder
+//	    arguments:
+//	      leastrequested.weight: 1
+//	      mostrequested.weight: 0
+//	      nodeaffinity.weight: 1
+//	      podaffinity.weight: 1
+//	      balancedresource.weight: 1
+//	      tainttoleration.weight: 1
+//	      imagelocality.weight: 1
 func calculateWeight(args framework.Arguments) priorityWeight {
 	// Initial values for weights.
 	// By default, for backward compatibility and for reasonable scores,
@@ -175,7 +176,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 			if !found {
 				klog.Warningf("node order, update pod %s/%s allocate from NOT EXIST node [%s]", pod.Namespace, pod.Name, nodeName)
 			} else {
-				err := node.RemovePod(pod)
+				err := node.RemovePod(klogv2.Background(), pod)
 				if err != nil {
 					klog.Errorf("Failed to update pod %s/%s and deallocate from node [%s]: %s", pod.Namespace, pod.Name, nodeName, err.Error())
 				} else {
@@ -186,12 +187,16 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 	})
 
 	fts := feature.Features{
-		//EnablePodAffinityNamespaceSelector: utilFeature.DefaultFeatureGate.Enabled(features.PodAffinityNamespaceSelector),
-		EnablePodDisruptionBudget:          utilFeature.DefaultFeatureGate.Enabled(features.PodDisruptionBudget),
-		EnablePodOverhead:                  utilFeature.DefaultFeatureGate.Enabled(features.PodOverhead),
-		EnableReadWriteOncePod:             utilFeature.DefaultFeatureGate.Enabled(features.ReadWriteOncePod),
-		EnableVolumeCapacityPriority:       utilFeature.DefaultFeatureGate.Enabled(features.VolumeCapacityPriority),
-		EnableCSIStorageCapacity:           utilFeature.DefaultFeatureGate.Enabled(features.CSIStorageCapacity),
+		EnableVolumeCapacityPriority:                 utilFeature.DefaultFeatureGate.Enabled(features.VolumeCapacityPriority),
+		EnableNodeInclusionPolicyInPodTopologySpread: utilFeature.DefaultFeatureGate.Enabled(features.NodeInclusionPolicyInPodTopologySpread),
+		EnableMatchLabelKeysInPodTopologySpread:      utilFeature.DefaultFeatureGate.Enabled(features.MatchLabelKeysInPodTopologySpread),
+		EnableDynamicResourceAllocation:              utilFeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation),
+		EnableDRAAdminAccess:                         utilFeature.DefaultFeatureGate.Enabled(features.DRAAdminAccess),
+		EnableInPlacePodVerticalScaling:              utilFeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling),
+		EnableSidecarContainers:                      utilFeature.DefaultFeatureGate.Enabled(features.SidecarContainers),
+		EnableSchedulingQueueHint:                    false,
+		EnableAsyncPreemption:                        utilFeature.DefaultFeatureGate.Enabled(features.SchedulerAsyncPreemption),
+		EnablePodLevelResources:                      utilFeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
 	}
 
 	// Initialize k8s scheduling plugins
@@ -203,8 +208,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 			Resources: []config.ResourceSpec{{Name: "cpu", Weight: 50}, {Name: "memory", Weight: 50}, {Name: "nvidia.com/gpu", Weight: 50}},
 		},
 	}
-	noderesources.NewFit(leastAllocatedArgs, handle, fts)
-	p, _ := noderesources.NewFit(leastAllocatedArgs, handle, fts)
+	p, _ := noderesources.NewFit(context.Background(), leastAllocatedArgs, handle, fts)
 	leastAllocated := p.(*noderesources.Fit)
 
 	// 2. NodeResourcesMostAllocated
@@ -214,8 +218,7 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 			Resources: []config.ResourceSpec{{Name: "cpu", Weight: 1}, {Name: "memory", Weight: 1}, {Name: "nvidia.com/gpu", Weight: 50}},
 		},
 	}
-	noderesources.NewFit(mostAllocatedArgs, handle, fts)
-	p, _ = noderesources.NewFit(mostAllocatedArgs, handle, fts)
+	p, _ = noderesources.NewFit(context.Background(), mostAllocatedArgs, handle, fts)
 	mostAllocation := p.(*noderesources.Fit)
 
 	// 3. NodeResourcesBalancedAllocation
@@ -226,18 +229,18 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 			{Name: "nvidia.com/gpu", Weight: 1},
 		},
 	}
-	p, _ = noderesources.NewBalancedAllocation(blArgs, handle, fts)
+	p, _ = noderesources.NewBalancedAllocation(context.Background(), blArgs, handle, fts)
 	balancedAllocation := p.(*noderesources.BalancedAllocation)
 
 	// 4. NodeAffinity
 	naArgs := &config.NodeAffinityArgs{
 		AddedAffinity: &v1.NodeAffinity{},
 	}
-	p, _ = nodeaffinity.New(naArgs, handle)
+	p, _ = nodeaffinity.New(context.Background(), naArgs, handle, fts)
 	nodeAffinity := p.(*nodeaffinity.NodeAffinity)
 
 	// 5. ImageLocality
-	p, _ = imagelocality.New(nil, handle)
+	p, _ = imagelocality.New(context.Background(), nil, handle)
 	imageLocality := p.(*imagelocality.ImageLocality)
 
 	nodeOrderFn := func(task *api.TaskInfo, node *api.NodeInfo) (float64, error) {
@@ -310,27 +313,33 @@ func (pp *nodeOrderPlugin) OnSessionOpen(ssn *framework.Session) {
 	ssn.AddNodeOrderFn(pp.Name(), nodeOrderFn)
 
 	plArgs := &config.InterPodAffinityArgs{}
-	p, _ = interpodaffinity.New(plArgs, handle, fts)
+	p, _ = interpodaffinity.New(context.Background(), plArgs, handle, fts)
 	interPodAffinity := p.(*interpodaffinity.InterPodAffinity)
 
-	p, _ = tainttoleration.New(nil, handle)
+	p, _ = tainttoleration.New(context.Background(), nil, handle, fts)
 	taintToleration := p.(*tainttoleration.TaintToleration)
 
 	batchNodeOrderFn := func(task *api.TaskInfo, nodeInfo []*api.NodeInfo) (map[string]float64, error) {
 		// InterPodAffinity
 		state := k8sframework.NewCycleState()
+		k8sNodeInfos := make([]*k8sframework.NodeInfo, 0, len(nodeInfo))
+		for _, node := range nodeInfo {
+			if ni, ok := nodeMap[node.Name]; ok {
+				k8sNodeInfos = append(k8sNodeInfos, ni)
+			}
+		}
 		nodes := make([]*v1.Node, 0, len(nodeInfo))
 		for _, node := range nodeInfo {
 			nodes = append(nodes, node.Node)
 		}
 		nodeScores := make(map[string]float64, len(nodes))
 
-		podAffinityScores, podErr := interPodAffinityScore(interPodAffinity, state, task.Pod, nodes, weight.podAffinityWeight)
+		podAffinityScores, podErr := interPodAffinityScore(interPodAffinity, state, task.Pod, k8sNodeInfos, weight.podAffinityWeight)
 		if podErr != nil {
 			return nil, podErr
 		}
 
-		nodeTolerationScores, err := taintTolerationScore(taintToleration, state, task.Pod, nodes, weight.taintTolerationWeight)
+		nodeTolerationScores, err := taintTolerationScore(taintToleration, state, task.Pod, k8sNodeInfos, weight.taintTolerationWeight)
 		if err != nil {
 			return nil, err
 		}
@@ -349,15 +358,15 @@ func interPodAffinityScore(
 	interPodAffinity *interpodaffinity.InterPodAffinity,
 	state *k8sframework.CycleState,
 	pod *v1.Pod,
-	nodes []*v1.Node,
+	nodeInfos []*k8sframework.NodeInfo,
 	podAffinityWeight int,
 ) (map[string]float64, error) {
-	preScoreStatus := interPodAffinity.PreScore(context.TODO(), state, pod, nodes)
+	preScoreStatus := interPodAffinity.PreScore(context.TODO(), state, pod, nodeInfos)
 	if !preScoreStatus.IsSuccess() {
 		return nil, preScoreStatus.AsError()
 	}
 
-	nodescoreList := make(k8sframework.NodeScoreList, len(nodes))
+	nodescoreList := make(k8sframework.NodeScoreList, len(nodeInfos))
 	// the default parallelization worker number is 16.
 	// the whole scoring will fail if one of the processes failed.
 	// so just create a parallelizeContext to control the whole ParallelizeUntil process.
@@ -369,8 +378,8 @@ func interPodAffinityScore(
 	workerNum := 16
 	errCh := make(chan error, workerNum)
 	parallelizeContext, parallelizeCancel := context.WithCancel(context.TODO())
-	workqueue.ParallelizeUntil(parallelizeContext, workerNum, len(nodes), func(index int) {
-		nodeName := nodes[index].Name
+	workqueue.ParallelizeUntil(parallelizeContext, workerNum, len(nodeInfos), func(index int) {
+		nodeName := nodeInfos[index].Node().Name
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		s, status := interPodAffinity.Score(ctx, state, pod, nodeName)
@@ -393,7 +402,7 @@ func interPodAffinityScore(
 
 	interPodAffinity.NormalizeScore(context.TODO(), state, pod, nodescoreList)
 
-	nodeScores := make(map[string]float64, len(nodes))
+	nodeScores := make(map[string]float64, len(nodeInfos))
 	for i, nodeScore := range nodescoreList {
 		// return error if score plugin returns invalid score.
 		if nodeScore.Score > k8sframework.MaxNodeScore || nodeScore.Score < k8sframework.MinNodeScore {
@@ -412,21 +421,21 @@ func taintTolerationScore(
 	taintToleration *tainttoleration.TaintToleration,
 	cycleState *k8sframework.CycleState,
 	pod *v1.Pod,
-	nodes []*v1.Node,
+	nodeInfos []*k8sframework.NodeInfo,
 	taintTolerationWeight int,
 ) (map[string]float64, error) {
-	preScoreStatus := taintToleration.PreScore(context.TODO(), cycleState, pod, nodes)
+	preScoreStatus := taintToleration.PreScore(context.TODO(), cycleState, pod, nodeInfos)
 	if !preScoreStatus.IsSuccess() {
 		return nil, preScoreStatus.AsError()
 	}
 
-	nodescoreList := make(k8sframework.NodeScoreList, len(nodes))
+	nodescoreList := make(k8sframework.NodeScoreList, len(nodeInfos))
 	// size of errCh should be no less than parallelization number, see interPodAffinityScore.
 	workerNum := 16
 	errCh := make(chan error, workerNum)
 	parallelizeContext, parallelizeCancel := context.WithCancel(context.TODO())
-	workqueue.ParallelizeUntil(parallelizeContext, workerNum, len(nodes), func(index int) {
-		nodeName := nodes[index].Name
+	workqueue.ParallelizeUntil(parallelizeContext, workerNum, len(nodeInfos), func(index int) {
+		nodeName := nodeInfos[index].Node().Name
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		s, status := taintToleration.Score(ctx, cycleState, pod, nodeName)
@@ -449,7 +458,7 @@ func taintTolerationScore(
 
 	taintToleration.NormalizeScore(context.TODO(), cycleState, pod, nodescoreList)
 
-	nodeScores := make(map[string]float64, len(nodes))
+	nodeScores := make(map[string]float64, len(nodeInfos))
 	for i, nodeScore := range nodescoreList {
 		// return error if score plugin returns invalid score.
 		if nodeScore.Score > k8sframework.MaxNodeScore || nodeScore.Score < k8sframework.MinNodeScore {

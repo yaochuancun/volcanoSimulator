@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Volcano Authors.
+Copyright The Volcano Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/tools/cache"
-	v1alpha1 "volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
+	nodeinfov1alpha1 "volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1"
 )
 
 // NumatopologyLister helps list Numatopologies.
@@ -29,39 +29,19 @@ import (
 type NumatopologyLister interface {
 	// List lists all Numatopologies in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.Numatopology, err error)
+	List(selector labels.Selector) (ret []*nodeinfov1alpha1.Numatopology, err error)
 	// Get retrieves the Numatopology from the index for a given name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1alpha1.Numatopology, error)
+	Get(name string) (*nodeinfov1alpha1.Numatopology, error)
 	NumatopologyListerExpansion
 }
 
 // numatopologyLister implements the NumatopologyLister interface.
 type numatopologyLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*nodeinfov1alpha1.Numatopology]
 }
 
 // NewNumatopologyLister returns a new NumatopologyLister.
 func NewNumatopologyLister(indexer cache.Indexer) NumatopologyLister {
-	return &numatopologyLister{indexer: indexer}
-}
-
-// List lists all Numatopologies in the indexer.
-func (s *numatopologyLister) List(selector labels.Selector) (ret []*v1alpha1.Numatopology, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1alpha1.Numatopology))
-	})
-	return ret, err
-}
-
-// Get retrieves the Numatopology from the index for a given name.
-func (s *numatopologyLister) Get(name string) (*v1alpha1.Numatopology, error) {
-	obj, exists, err := s.indexer.GetByKey(name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1alpha1.Resource("numatopology"), name)
-	}
-	return obj.(*v1alpha1.Numatopology), nil
+	return &numatopologyLister{listers.New[*nodeinfov1alpha1.Numatopology](indexer, nodeinfov1alpha1.Resource("numatopology"))}
 }

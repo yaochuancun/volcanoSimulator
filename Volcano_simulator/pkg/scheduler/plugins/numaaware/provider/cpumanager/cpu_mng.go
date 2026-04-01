@@ -22,8 +22,8 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
-	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager/bitmask"
+	"k8s.io/utils/cpuset"
 
 	"volcano.sh/volcano/pkg/scheduler/api"
 	"volcano.sh/volcano/pkg/scheduler/plugins/numaaware/policy"
@@ -57,7 +57,7 @@ func guaranteedCPUs(container *v1.Container) int {
 func generateCPUTopologyHints(availableCPUs cpuset.CPUSet, CPUDetails topology.CPUDetails, request int) []policy.TopologyHint {
 	minAffinitySize := CPUDetails.NUMANodes().Size()
 	hints := []policy.TopologyHint{}
-	bitmask.IterateBitMasks(CPUDetails.NUMANodes().ToSlice(), func(mask bitmask.BitMask) {
+	bitmask.IterateBitMasks(CPUDetails.NUMANodes().List(), func(mask bitmask.BitMask) {
 		// First, update minAffinitySize for the current request size.
 		cpusInMask := CPUDetails.CPUsInNUMANodes(mask.GetBits()...).Size()
 		if cpusInMask >= request && mask.Count() < minAffinitySize {
@@ -69,7 +69,7 @@ func generateCPUTopologyHints(availableCPUs cpuset.CPUSet, CPUDetails topology.C
 		numMatching := 0
 		// Finally, check to see if enough available CPUs remain on the current
 		// NUMA node combination to satisfy the CPU request.
-		for _, c := range availableCPUs.ToSlice() {
+		for _, c := range availableCPUs.List() {
 			if mask.IsSet(CPUDetails[c].NUMANodeID) {
 				numMatching++
 			}
@@ -122,7 +122,7 @@ func (mng *cpuMng) GetTopologyHints(container *v1.Container,
 		CPUDetails: topoInfo.CPUDetail,
 	}
 
-	reserved := cpuset.NewCPUSet()
+	reserved := cpuset.New()
 	reservedCPUs, ok := topoInfo.ResReserved[v1.ResourceCPU]
 	if ok {
 		// Take the ceiling of the reservation, since fractional CPUs cannot be
@@ -155,7 +155,7 @@ func (mng *cpuMng) Allocate(container *v1.Container, bestHit *policy.TopologyHin
 		CPUDetails: topoInfo.CPUDetail,
 	}
 
-	reserved := cpuset.NewCPUSet()
+	reserved := cpuset.New()
 	reservedCPUs, ok := topoInfo.ResReserved[v1.ResourceCPU]
 	if ok {
 		// Take the ceiling of the reservation, since fractional CPUs cannot be
@@ -172,9 +172,9 @@ func (mng *cpuMng) Allocate(container *v1.Container, bestHit *policy.TopologyHin
 
 	klog.V(4).Infof("alignedCPUs: %v requestNum: %v bestHit %v", availableCPUSet, requestNum, bestHit)
 
-	result := cpuset.NewCPUSet()
+	result := cpuset.New()
 	if bestHit.NUMANodeAffinity != nil {
-		alignedCPUs := cpuset.NewCPUSet()
+		alignedCPUs := cpuset.New()
 		for _, numaNodeID := range bestHit.NUMANodeAffinity.GetBits() {
 			alignedCPUs = alignedCPUs.Union(availableCPUSet.Intersection(cputopo.CPUDetails.CPUsInNUMANodes(numaNodeID)))
 		}
@@ -187,7 +187,7 @@ func (mng *cpuMng) Allocate(container *v1.Container, bestHit *policy.TopologyHin
 		alignedCPUs, err := takeByTopology(cputopo, alignedCPUs, numAlignedToAlloc)
 		if err != nil {
 			return map[string]cpuset.CPUSet{
-				string(v1.ResourceCPU): cpuset.NewCPUSet(),
+				string(v1.ResourceCPU): cpuset.New(),
 			}
 		}
 
@@ -198,7 +198,7 @@ func (mng *cpuMng) Allocate(container *v1.Container, bestHit *policy.TopologyHin
 	remainingCPUs, err := takeByTopology(cputopo, availableCPUSet.Difference(result), requestNum-result.Size())
 	if err != nil {
 		return map[string]cpuset.CPUSet{
-			string(v1.ResourceCPU): cpuset.NewCPUSet(),
+			string(v1.ResourceCPU): cpuset.New(),
 		}
 	}
 

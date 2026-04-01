@@ -18,6 +18,8 @@ package helpers
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"net"
 	"net/http"
@@ -34,13 +36,27 @@ import (
 	"k8s.io/apiserver/pkg/server/healthz"
 	"k8s.io/apiserver/pkg/server/mux"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 
 	vcbatch "volcano.sh/apis/pkg/apis/batch/v1alpha1"
 	vcbus "volcano.sh/apis/pkg/apis/bus/v1alpha1"
+	flow "volcano.sh/apis/pkg/apis/flow/v1alpha1"
 	schedulerv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 )
 
+const (
+	// DefaultReadHeaderTimeout defines the default timeout for reading request headers
+	DefaultReadHeaderTimeout = 5 * time.Second
+	// DefaultReadTimeout defines the default timeout for reading the entire request
+	DefaultReadTimeout = 30 * time.Second
+	// DefaultWriteTimeout defines the default timeout for writing the response
+	DefaultWriteTimeout = 60 * time.Second
+	// DefaultMaxHeaderBytes defines the default max size of request headers in bytes
+	// 1 MB
+	DefaultMaxHeaderBytes = 1 << 20
+)
+
+// JobKind creates job GroupVersionKind.
 // JobKind creates job GroupVersionKind.
 var JobKind = vcbatch.SchemeGroupVersion.WithKind("Job")
 
@@ -49,6 +65,12 @@ var CommandKind = vcbus.SchemeGroupVersion.WithKind("Command")
 
 // V1beta1QueueKind is queue kind with v1alpha2 version.
 var V1beta1QueueKind = schedulerv1beta1.SchemeGroupVersion.WithKind("Queue")
+
+// JobFlowKind creates jobflow GroupVersionKind.
+var JobFlowKind = flow.SchemeGroupVersion.WithKind("JobFlow")
+
+// JobTemplateKind creates jobtemplate GroupVersionKind.
+var JobTemplateKind = flow.SchemeGroupVersion.WithKind("JobTemplate")
 
 // CreateOrUpdateConfigMap creates config map if not present or updates config map if necessary.
 func CreateOrUpdateConfigMap(job *vcbatch.Job, kubeClients kubernetes.Interface, data map[string]string, cmName string) error {
@@ -181,7 +203,7 @@ func GeneratePodgroupName(pod *v1.Pod) string {
 }
 
 // StartHealthz register healthz interface.
-func StartHealthz(healthzBindAddress, name string) error {
+func StartHealthz(healthzBindAddress, name string, caCertData, certData, certKeyData []byte) error {
 	listener, err := net.Listen("tcp", healthzBindAddress)
 	if err != nil {
 		return fmt.Errorf("failed to create listener: %v", err)
@@ -191,9 +213,32 @@ func StartHealthz(healthzBindAddress, name string) error {
 	healthz.InstallHandler(pathRecorderMux)
 
 	server := &http.Server{
-		Addr:           listener.Addr().String(),
-		Handler:        pathRecorderMux,
-		MaxHeaderBytes: 1 << 20,
+		Addr:              listener.Addr().String(),
+		Handler:           pathRecorderMux,
+		MaxHeaderBytes:    DefaultMaxHeaderBytes,
+		ReadHeaderTimeout: DefaultReadHeaderTimeout,
+		ReadTimeout:       DefaultReadTimeout,
+		WriteTimeout:      DefaultWriteTimeout,
+	}
+	if len(caCertData) != 0 && len(certData) != 0 && len(certKeyData) != 0 {
+		certPool := x509.NewCertPool()
+		certPool.AppendCertsFromPEM(caCertData)
+
+		sCert, err := tls.X509KeyPair(certData, certKeyData)
+		if err != nil {
+			return fmt.Errorf("failed to parse certData: %v", err)
+		}
+		server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{sCert},
+			RootCAs:      certPool,
+			MinVersion:   tls.VersionTLS12,
+			ClientAuth:   tls.VerifyClientCertIfGiven,
+			CipherSuites: []uint16{
+				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
+				tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
+			},
+		}
 	}
 
 	return runServer(server, listener)
@@ -204,7 +249,7 @@ func runServer(server *http.Server, ln net.Listener) error {
 		return fmt.Errorf("listener and server must not be nil")
 	}
 
-	stopCh := make(chan os.Signal)
+	stopCh := make(chan os.Signal, 2)
 	signal.Notify(stopCh, syscall.SIGTERM, syscall.SIGINT)
 
 	go func() {
@@ -219,7 +264,12 @@ func runServer(server *http.Server, ln net.Listener) error {
 
 		listener := tcpKeepAliveListener{ln.(*net.TCPListener)}
 
-		err := server.Serve(listener)
+		var err error
+		if server.TLSConfig != nil {
+			err = server.ServeTLS(listener, "", "")
+		} else {
+			err = server.Serve(listener)
+		}
 		msg := fmt.Sprintf("Stopped listening on %s", listener.Addr().String())
 		select {
 		case <-stopCh:

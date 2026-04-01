@@ -24,7 +24,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	utilFeature "k8s.io/apiserver/pkg/util/feature"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/klog"
+	klogv2 "k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	k8sframework "k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/feature"
@@ -236,7 +239,7 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 				klog.V(4).Infof("predicates with gpu sharing, update pod %s/%s deallocate from node [%s]", pod.Namespace, pod.Name, nodeName)
 			}
 
-			err := node.RemovePod(pod)
+			err := node.RemovePod(klogv2.Background(), pod)
 			if err != nil {
 				klog.Errorf("predicates, remove pod %s/%s from node [%s] error: %v", pod.Namespace, pod.Name, nodeName, err)
 				return
@@ -248,25 +251,36 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 	// Initialize k8s plugins
 	// TODO: Add more predicates, k8s.io/kubernetes/pkg/scheduler/framework/plugins/legacy_registry.go
 	handle := k8s.NewFrameworkHandle(nodeMap, ssn.KubeClient(), ssn.InformerFactory())
+	fts := feature.Features{
+		EnableVolumeCapacityPriority:                 utilFeature.DefaultFeatureGate.Enabled(features.VolumeCapacityPriority),
+		EnableNodeInclusionPolicyInPodTopologySpread: utilFeature.DefaultFeatureGate.Enabled(features.NodeInclusionPolicyInPodTopologySpread),
+		EnableMatchLabelKeysInPodTopologySpread:      utilFeature.DefaultFeatureGate.Enabled(features.MatchLabelKeysInPodTopologySpread),
+		EnableDynamicResourceAllocation:              utilFeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation),
+		EnableDRAAdminAccess:                         utilFeature.DefaultFeatureGate.Enabled(features.DRAAdminAccess),
+		EnableInPlacePodVerticalScaling:              utilFeature.DefaultFeatureGate.Enabled(features.InPlacePodVerticalScaling),
+		EnableSidecarContainers:                      utilFeature.DefaultFeatureGate.Enabled(features.SidecarContainers),
+		EnableSchedulingQueueHint:                    false,
+		EnableAsyncPreemption:                        utilFeature.DefaultFeatureGate.Enabled(features.SchedulerAsyncPreemption),
+		EnablePodLevelResources:                      utilFeature.DefaultFeatureGate.Enabled(features.PodLevelResources),
+	}
 	// 1. NodeUnschedulable
-	plugin, _ := nodeunschedulable.New(nil, handle)
+	plugin, _ := nodeunschedulable.New(context.Background(), nil, handle, fts)
 	nodeUnscheduleFilter := plugin.(*nodeunschedulable.NodeUnschedulable)
 	// 2. NodeAffinity
-	nodeAffinityArgs := config.NodeAffinityArgs{
+	nodeAffinityArgs := &config.NodeAffinityArgs{
 		AddedAffinity: &v1.NodeAffinity{},
 	}
-	plugin, _ = nodeaffinity.New(&nodeAffinityArgs, handle)
+	plugin, _ = nodeaffinity.New(context.Background(), nodeAffinityArgs, handle, fts)
 	nodeAffinityFilter := plugin.(*nodeaffinity.NodeAffinity)
 	// 3. NodePorts
-	plugin, _ = nodeports.New(nil, handle)
+	plugin, _ = nodeports.New(context.Background(), nil, handle, fts)
 	nodePortFilter := plugin.(*nodeports.NodePorts)
 	// 4. TaintToleration
-	plugin, _ = tainttoleration.New(nil, handle)
+	plugin, _ = tainttoleration.New(context.Background(), nil, handle, fts)
 	tolerationFilter := plugin.(*tainttoleration.TaintToleration)
 	// 5. InterPodAffinity
 	plArgs := &config.InterPodAffinityArgs{}
-	features := feature.Features{}
-	plugin, _ = interpodaffinity.New(plArgs, handle, features)
+	plugin, _ = interpodaffinity.New(context.Background(), plArgs, handle, fts)
 	podAffinityFilter := plugin.(*interpodaffinity.InterPodAffinity)
 
 	ssn.AddPredicateFn(pp.Name(), func(task *api.TaskInfo, node *api.NodeInfo) error {
@@ -328,16 +342,17 @@ func (pp *predicatesPlugin) OnSessionOpen(ssn *framework.Session) {
 		}
 
 		// Check NodePorts
-		nodePortFilter.PreFilter(context.TODO(), state, task.Pod)
+		if _, st := nodePortFilter.PreFilter(context.TODO(), state, task.Pod); !st.IsSuccess() {
+			return fmt.Errorf("plugin %s pre-predicates failed %s", nodeports.Name, st.Message())
+		}
 		status := nodePortFilter.Filter(context.TODO(), state, nil, nodeInfo)
 		if !status.IsSuccess() {
-			return fmt.Errorf("plugin %s predicates failed %s", nodeaffinity.Name, status.Message())
+			return fmt.Errorf("plugin %s predicates failed %s", nodeports.Name, status.Message())
 		}
 
 		// InterPodAffinity Predicate
-		status = podAffinityFilter.PreFilter(context.TODO(), state, task.Pod)
-		if !status.IsSuccess() {
-			return fmt.Errorf("plugin %s pre-predicates failed %s", interpodaffinity.Name, status.Message())
+		if _, st := podAffinityFilter.PreFilter(context.TODO(), state, task.Pod); !st.IsSuccess() {
+			return fmt.Errorf("plugin %s pre-predicates failed %s", interpodaffinity.Name, st.Message())
 		}
 
 		status = podAffinityFilter.Filter(context.TODO(), state, task.Pod, nodeInfo)

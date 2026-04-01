@@ -36,7 +36,6 @@ import (
 	infov1 "k8s.io/client-go/informers/core/v1"
 	schedv1 "k8s.io/client-go/informers/scheduling/v1"
 	storagev1 "k8s.io/client-go/informers/storage/v1"
-	storagev1beta1 "k8s.io/client-go/informers/storage/v1beta1"
 	"k8s.io/client-go/kubernetes"
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
@@ -44,6 +43,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/client-go/util/workqueue"
 	"k8s.io/klog"
+	klogv2 "k8s.io/klog/v2"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	volumescheduling "k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumebinding"
 
@@ -59,6 +59,7 @@ import (
 	"volcano.sh/volcano/cmd/sim/app/options"
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 	"volcano.sh/volcano/pkg/scheduler/metrics"
+	schedutil "volcano.sh/volcano/pkg/scheduler/util"
 )
 
 func init() {
@@ -96,7 +97,7 @@ type SchedulerCache struct {
 	quotaInformer              infov1.ResourceQuotaInformer
 	csiNodeInformer            storagev1.CSINodeInformer
 	csiDriverInformer          storagev1.CSIDriverInformer
-	csiStorageCapacityInformer storagev1beta1.CSIStorageCapacityInformer
+	csiStorageCapacityInformer storagev1.CSIStorageCapacityInformer
 	cpuInformer                cpuinformerv1.NumatopologyInformer
 
 	Binder         Binder
@@ -132,7 +133,7 @@ type DefaultBinder struct {
 	// kubeclient *kubernetes.Clientset
 }
 
-//Bind will send bind request to api server
+// Bind will send bind request to api server
 func (db *DefaultBinder) Bind(kubeClient *kubernetes.Clientset, tasks []*schedulingapi.TaskInfo) ([]*schedulingapi.TaskInfo, error) {
 	var errTasks []*schedulingapi.TaskInfo
 	for _, task := range tasks {
@@ -269,7 +270,7 @@ type defaultVolumeBinder struct {
 
 // AllocateVolumes allocates volume on the host to the task
 func (dvb *defaultVolumeBinder) AllocateVolumes(task *schedulingapi.TaskInfo, hostname string, podVolumes *volumescheduling.PodVolumes) error {
-	allBound, err := dvb.volumeBinder.AssumePodVolumes(task.Pod, hostname, podVolumes)
+	allBound, err := dvb.volumeBinder.AssumePodVolumes(klogv2.Background(), task.Pod, hostname, podVolumes)
 	task.VolumeReady = allBound
 
 	return err
@@ -288,15 +289,15 @@ func (dvb *defaultVolumeBinder) RevertVolumes(task *schedulingapi.TaskInfo, podV
 // GetPodVolumes get pod volume on the host
 func (dvb *defaultVolumeBinder) GetPodVolumes(task *schedulingapi.TaskInfo,
 	node *v1.Node) (podVolumes *volumescheduling.PodVolumes, err error) {
-	boundClaims, claimsToBind, unboundClaimsImmediate, err := dvb.volumeBinder.GetPodVolumes(task.Pod)
+	podVolumeClaims, err := dvb.volumeBinder.GetPodVolumeClaims(klogv2.Background(), task.Pod)
 	if err != nil {
 		return nil, err
 	}
-	if len(unboundClaimsImmediate) > 0 {
+	if schedutil.PodVolumeClaimsUnboundImmediateLen(podVolumeClaims) > 0 {
 		return nil, fmt.Errorf("pod has unbound immediate PersistentVolumeClaims")
 	}
 
-	podVolumes, reasons, err := dvb.volumeBinder.FindPodVolumes(task.Pod, boundClaims, claimsToBind, node)
+	podVolumes, reasons, err := dvb.volumeBinder.FindPodVolumes(klogv2.Background(), task.Pod, podVolumeClaims, node)
 	if err != nil {
 		return nil, err
 	} else if len(reasons) > 0 {
@@ -317,7 +318,7 @@ func (dvb *defaultVolumeBinder) BindVolumes(task *schedulingapi.TaskInfo, podVol
 		return nil
 	}
 
-	return dvb.volumeBinder.BindPodVolumes(task.Pod, podVolumes)
+	return dvb.volumeBinder.BindPodVolumes(context.Background(), task.Pod, podVolumes)
 }
 
 type podgroupBinder struct {
@@ -496,20 +497,15 @@ func newSchedulerCache(config *rest.Config, schedulerName string, defaultQueue s
 	sc.scInformer = informerFactory.Storage().V1().StorageClasses()
 	sc.csiNodeInformer = informerFactory.Storage().V1().CSINodes()
 	sc.csiDriverInformer = informerFactory.Storage().V1().CSIDrivers()
-	sc.csiStorageCapacityInformer = informerFactory.Storage().V1beta1().CSIStorageCapacities()
+	sc.csiStorageCapacityInformer = informerFactory.Storage().V1().CSIStorageCapacities()
 
-	var capacityCheck *volumescheduling.CapacityCheck
-	if options.ServerOpts.EnableCSIStorage {
-		capacityCheck = &volumescheduling.CapacityCheck{
-			CSIDriverInformer:          sc.csiDriverInformer,
-			CSIStorageCapacityInformer: sc.csiStorageCapacityInformer,
-		}
-	} else {
-		capacityCheck = nil
+	capacityCheck := volumescheduling.CapacityCheck{
+		CSIDriverInformer:          sc.csiDriverInformer,
+		CSIStorageCapacityInformer: sc.csiStorageCapacityInformer,
 	}
-
 	sc.VolumeBinder = &defaultVolumeBinder{
 		volumeBinder: volumescheduling.NewVolumeBinder(
+			klogv2.Background(),
 			sc.kubeClient,
 			sc.podInformer,
 			sc.nodeInformer,
@@ -652,7 +648,7 @@ func (sc *SchedulerCache) Evict(taskInfo *schedulingapi.TaskInfo, reason string)
 		return err
 	}
 
-	node, found := sc.Nodes[task.NodeName]//找到cache中对应的node
+	node, found := sc.Nodes[task.NodeName] //找到cache中对应的node
 	if !found {
 		return fmt.Errorf("failed to bind Task %v to host %v, host does not exist",
 			task.UID, task.NodeName)

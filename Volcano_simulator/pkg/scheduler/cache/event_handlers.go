@@ -28,7 +28,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
-	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
+	"k8s.io/utils/cpuset"
 
 	nodeinfov1alpha1 "volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1"
 	"volcano.sh/apis/pkg/apis/scheduling"
@@ -616,7 +616,7 @@ func (sc *SchedulerCache) deleteQueue(id schedulingapi.QueueID) {
 	delete(sc.Queues, id)
 }
 
-//DeletePriorityClass delete priorityclass from the scheduler cache
+// DeletePriorityClass delete priorityclass from the scheduler cache
 func (sc *SchedulerCache) DeletePriorityClass(obj interface{}) {
 	var ss *schedulingv1.PriorityClass
 	switch t := obj.(type) {
@@ -640,7 +640,7 @@ func (sc *SchedulerCache) DeletePriorityClass(obj interface{}) {
 	sc.deletePriorityClass(ss)
 }
 
-//UpdatePriorityClass update priorityclass to scheduler cache
+// UpdatePriorityClass update priorityclass to scheduler cache
 func (sc *SchedulerCache) UpdatePriorityClass(oldObj, newObj interface{}) {
 	oldSS, ok := oldObj.(*schedulingv1.PriorityClass)
 	if !ok {
@@ -662,7 +662,7 @@ func (sc *SchedulerCache) UpdatePriorityClass(oldObj, newObj interface{}) {
 	sc.addPriorityClass(newSS)
 }
 
-//AddPriorityClass add priorityclass to scheduler cache
+// AddPriorityClass add priorityclass to scheduler cache
 func (sc *SchedulerCache) AddPriorityClass(obj interface{}) {
 	ss, ok := obj.(*schedulingv1.PriorityClass)
 	if !ok {
@@ -794,7 +794,13 @@ func getNumaInfo(srcInfo *nodeinfov1alpha1.Numatopology) *schedulingapi.Numatopo
 	for name, resInfo := range numaResMap {
 		tmp := schedulingapi.ResourceInfo{}
 		tmp.Capacity = resInfo.Capacity
-		tmp.Allocatable = cpuset.MustParse(resInfo.Allocatable)
+		parsed, err := cpuset.Parse(resInfo.Allocatable)
+		if err != nil {
+			klog.Errorf("cpuset.Parse(%q) failed: %v", resInfo.Allocatable, err)
+			tmp.Allocatable = cpuset.New()
+		} else {
+			tmp.Allocatable = parsed
+		}
 		numaInfo.NumaResMap[name] = &tmp
 	}
 

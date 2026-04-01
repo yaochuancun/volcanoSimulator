@@ -19,6 +19,8 @@ package v1alpha1
 const (
 	// TaskSpecKey task spec key used in pod annotation
 	TaskSpecKey = "volcano.sh/task-spec"
+	// TaskIndex is task index of each spec in annotation / labels
+	TaskIndex = "volcano.sh/task-index"
 	// JobNameKey job name key used in pod annotation / labels
 	JobNameKey = "volcano.sh/job-name"
 	// QueueNameKey queue name key used in pod annotation / labels
@@ -31,6 +33,8 @@ const (
 	JobVersion = "volcano.sh/job-version"
 	// JobTypeKey job type key used in labels
 	JobTypeKey = "volcano.sh/job-type"
+	// JobRetryCountKey job retry count key used in pod annotation
+	JobRetryCountKey = "volcano.sh/job-retry-count"
 	// PodgroupNamePrefix podgroup name prefix
 	PodgroupNamePrefix = "podgroup-"
 	// PodTemplateKey type specify a equivalence pod class

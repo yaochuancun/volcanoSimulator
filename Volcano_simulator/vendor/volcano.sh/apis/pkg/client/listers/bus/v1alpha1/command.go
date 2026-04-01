@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Volcano Authors.
+Copyright The Volcano Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/tools/cache"
-	v1alpha1 "volcano.sh/apis/pkg/apis/bus/v1alpha1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
+	busv1alpha1 "volcano.sh/apis/pkg/apis/bus/v1alpha1"
 )
 
 // CommandLister helps list Commands.
@@ -29,7 +29,7 @@ import (
 type CommandLister interface {
 	// List lists all Commands in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.Command, err error)
+	List(selector labels.Selector) (ret []*busv1alpha1.Command, err error)
 	// Commands returns an object that can list and get Commands.
 	Commands(namespace string) CommandNamespaceLister
 	CommandListerExpansion
@@ -37,25 +37,17 @@ type CommandLister interface {
 
 // commandLister implements the CommandLister interface.
 type commandLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*busv1alpha1.Command]
 }
 
 // NewCommandLister returns a new CommandLister.
 func NewCommandLister(indexer cache.Indexer) CommandLister {
-	return &commandLister{indexer: indexer}
-}
-
-// List lists all Commands in the indexer.
-func (s *commandLister) List(selector labels.Selector) (ret []*v1alpha1.Command, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1alpha1.Command))
-	})
-	return ret, err
+	return &commandLister{listers.New[*busv1alpha1.Command](indexer, busv1alpha1.Resource("command"))}
 }
 
 // Commands returns an object that can list and get Commands.
 func (s *commandLister) Commands(namespace string) CommandNamespaceLister {
-	return commandNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return commandNamespaceLister{listers.NewNamespaced[*busv1alpha1.Command](s.ResourceIndexer, namespace)}
 }
 
 // CommandNamespaceLister helps list and get Commands.
@@ -63,36 +55,15 @@ func (s *commandLister) Commands(namespace string) CommandNamespaceLister {
 type CommandNamespaceLister interface {
 	// List lists all Commands in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1alpha1.Command, err error)
+	List(selector labels.Selector) (ret []*busv1alpha1.Command, err error)
 	// Get retrieves the Command from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1alpha1.Command, error)
+	Get(name string) (*busv1alpha1.Command, error)
 	CommandNamespaceListerExpansion
 }
 
 // commandNamespaceLister implements the CommandNamespaceLister
 // interface.
 type commandNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all Commands in the indexer for a given namespace.
-func (s commandNamespaceLister) List(selector labels.Selector) (ret []*v1alpha1.Command, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1alpha1.Command))
-	})
-	return ret, err
-}
-
-// Get retrieves the Command from the indexer for a given namespace and name.
-func (s commandNamespaceLister) Get(name string) (*v1alpha1.Command, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1alpha1.Resource("command"), name)
-	}
-	return obj.(*v1alpha1.Command), nil
+	listers.ResourceIndexer[*busv1alpha1.Command]
 }

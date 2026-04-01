@@ -19,140 +19,152 @@ package k8s
 import (
 	"context"
 
-	"k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	resourceapi "k8s.io/api/resource/v1beta1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/informers"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
+	clientset "k8s.io/client-go/kubernetes"
+	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/events"
-	"k8s.io/kubernetes/pkg/scheduler/apis/config"
+	"k8s.io/dynamic-resource-allocation/structured"
+	"k8s.io/klog/v2"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/parallelize"
-	scheduling "k8s.io/kubernetes/pkg/scheduler/framework/plugins/volumebinding"
 )
 
-// Framework is a K8S framework who mainly provides some methods
-// about snapshot and plugins such as predicates
+// Framework is a minimal framework.Handle for in-process K8s scheduler plugins (predicates, etc.).
 type Framework struct {
 	snapshot        framework.SharedLister
-	kubeClient      kubernetes.Interface
+	kubeClient      clientset.Interface
 	informerFactory informers.SharedInformerFactory
 }
 
-var _ framework.Handle = &Framework{}
+var _ framework.Handle = (*Framework)(nil)
 
-// SnapshotSharedLister returns the scheduler's SharedLister of the latest NodeInfo
-// snapshot. The snapshot is taken at the beginning of a scheduling cycle and remains
-// unchanged until a pod finishes "Reserve". There is no guarantee that the information
-// remains unchanged after "Reserve".
 func (f *Framework) SnapshotSharedLister() framework.SharedLister {
 	return f.snapshot
 }
 
-// IterateOverWaitingPods acquires a read lock and iterates over the WaitingPods map.
 func (f *Framework) IterateOverWaitingPods(callback func(framework.WaitingPod)) {
 	panic("not implemented")
 }
 
-// GetWaitingPod returns a reference to a WaitingPod given its UID.
 func (f *Framework) GetWaitingPod(uid types.UID) framework.WaitingPod {
 	panic("not implemented")
 }
 
-// HasFilterPlugins returns true if at least one filter plugin is defined.
-func (f *Framework) HasFilterPlugins() bool {
+func (f *Framework) RejectWaitingPod(uid types.UID) bool {
 	panic("not implemented")
 }
 
-// HasScorePlugins returns true if at least one score plugin is defined.
-func (f *Framework) HasScorePlugins() bool {
-	panic("not implemented")
-}
-
-// ListPlugins returns a map of extension point name to plugin names configured at each extension
-// point. Returns nil if no plugins where configred.
-func (f *Framework) ListPlugins() map[string][]config.Plugin {
-	panic("not implemented")
-}
-
-// ClientSet returns a kubernetes clientset.
-func (f *Framework) ClientSet() kubernetes.Interface {
+func (f *Framework) ClientSet() clientset.Interface {
 	return f.kubeClient
 }
 
-// SharedInformerFactory returns a shared informer factory.
-func (f *Framework) SharedInformerFactory() informers.SharedInformerFactory {
-	return f.informerFactory
-}
-
-// VolumeBinder returns the volume binder used by scheduler.
-func (f *Framework) VolumeBinder() scheduling.SchedulerVolumeBinder {
+func (f *Framework) KubeConfig() *restclient.Config {
 	panic("not implemented")
 }
 
-// EventRecorder was introduced in k8s v1.19.6 and to be implemented
 func (f *Framework) EventRecorder() events.EventRecorder {
 	return nil
 }
 
-func (f *Framework) AddNominatedPod(pod *framework.PodInfo, nodeName string) {
-	panic("implement me")
+func (f *Framework) SharedInformerFactory() informers.SharedInformerFactory {
+	return f.informerFactory
 }
 
-func (f *Framework) DeleteNominatedPodIfExists(pod *v1.Pod) {
-	panic("implement me")
-}
-
-func (f *Framework) UpdateNominatedPod(oldPod *v1.Pod, newPodInfo *framework.PodInfo) {
-	panic("implement me")
-}
-
-func (f *Framework) NominatedPodsForNode(nodeName string) []*framework.PodInfo {
-	panic("implement me")
-}
-
-func (f *Framework) RunPreScorePlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*v1.Node) *framework.Status {
-	panic("implement me")
-}
-
-func (f *Framework) RunScorePlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*v1.Node) (framework.PluginToNodeScores, *framework.Status) {
-	panic("implement me")
-}
-
-func (f *Framework) RunFilterPlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, info *framework.NodeInfo) framework.PluginToStatus {
-	panic("implement me")
-}
-
-func (f *Framework) RunPreFilterExtensionAddPod(ctx context.Context, state *framework.CycleState, podToSchedule *v1.Pod, podInfoToAdd *framework.PodInfo, nodeInfo *framework.NodeInfo) *framework.Status {
-	panic("implement me")
-}
-
-func (f *Framework) RunPreFilterExtensionRemovePod(ctx context.Context, state *framework.CycleState, podToSchedule *v1.Pod, podInfoToRemove *framework.PodInfo, nodeInfo *framework.NodeInfo) *framework.Status {
-	panic("implement me")
-}
-
-func (f *Framework) RejectWaitingPod(uid types.UID) bool {
-	panic("implement me")
-}
-
-func (f *Framework) KubeConfig() *rest.Config {
-	panic("implement me")
+func (f *Framework) SharedDRAManager() framework.SharedDRAManager {
+	return noopSharedDRAManager{}
 }
 
 func (f *Framework) RunFilterPluginsWithNominatedPods(ctx context.Context, state *framework.CycleState, pod *v1.Pod, info *framework.NodeInfo) *framework.Status {
-	panic("implement me")
+	panic("not implemented")
 }
 
 func (f *Framework) Extenders() []framework.Extender {
-	panic("implement me")
+	panic("not implemented")
 }
 
 func (f *Framework) Parallelizer() parallelize.Parallelizer {
 	return parallelize.NewParallelizer(16)
 }
 
-// NewFrameworkHandle creates a FrameworkHandle interface, which is used by k8s plugins.
-func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client kubernetes.Interface, informerFactory informers.SharedInformerFactory) framework.Handle {
+// PodNominator
+func (f *Framework) AddNominatedPod(logger klog.Logger, pod *framework.PodInfo, nominatingInfo *framework.NominatingInfo) {
+	panic("not implemented")
+}
+
+func (f *Framework) DeleteNominatedPodIfExists(pod *v1.Pod) {
+	panic("not implemented")
+}
+
+func (f *Framework) UpdateNominatedPod(logger klog.Logger, oldPod *v1.Pod, newPodInfo *framework.PodInfo) {
+	panic("not implemented")
+}
+
+func (f *Framework) NominatedPodsForNode(nodeName string) []*framework.PodInfo {
+	panic("not implemented")
+}
+
+// PluginsRunner
+func (f *Framework) RunPreScorePlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*framework.NodeInfo) *framework.Status {
+	panic("not implemented")
+}
+
+func (f *Framework) RunScorePlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, nodes []*framework.NodeInfo) ([]framework.NodePluginScores, *framework.Status) {
+	panic("not implemented")
+}
+
+func (f *Framework) RunFilterPlugins(ctx context.Context, state *framework.CycleState, pod *v1.Pod, info *framework.NodeInfo) *framework.Status {
+	panic("not implemented")
+}
+
+func (f *Framework) RunPreFilterExtensionAddPod(ctx context.Context, state *framework.CycleState, podToSchedule *v1.Pod, podInfoToAdd *framework.PodInfo, nodeInfo *framework.NodeInfo) *framework.Status {
+	panic("not implemented")
+}
+
+func (f *Framework) RunPreFilterExtensionRemovePod(ctx context.Context, state *framework.CycleState, podToSchedule *v1.Pod, podInfoToRemove *framework.PodInfo, nodeInfo *framework.NodeInfo) *framework.Status {
+	panic("not implemented")
+}
+
+// PodActivator
+func (f *Framework) Activate(logger klog.Logger, pods map[string]*v1.Pod) {}
+
+type noopSharedDRAManager struct{}
+
+type noopClaimTracker struct{}
+
+func (noopClaimTracker) List() ([]*resourceapi.ResourceClaim, error) { return nil, nil }
+func (noopClaimTracker) Get(string, string) (*resourceapi.ResourceClaim, error) {
+	return nil, nil
+}
+func (noopClaimTracker) ListAllAllocatedDevices() (sets.Set[structured.DeviceID], error) {
+	return sets.New[structured.DeviceID](), nil
+}
+func (noopClaimTracker) SignalClaimPendingAllocation(types.UID, *resourceapi.ResourceClaim) error {
+	return nil
+}
+func (noopClaimTracker) ClaimHasPendingAllocation(types.UID) bool { return false }
+func (noopClaimTracker) RemoveClaimPendingAllocation(types.UID) (bool) { return false }
+func (noopClaimTracker) AssumeClaimAfterAPICall(*resourceapi.ResourceClaim) error { return nil }
+func (noopClaimTracker) AssumedClaimRestore(string, string) {}
+
+type noopResourceSliceLister struct{}
+
+func (noopResourceSliceLister) List() ([]*resourceapi.ResourceSlice, error) { return nil, nil }
+
+type noopDeviceClassLister struct{}
+
+func (noopDeviceClassLister) List() ([]*resourceapi.DeviceClass, error) { return nil, nil }
+func (noopDeviceClassLister) Get(string) (*resourceapi.DeviceClass, error) { return nil, nil }
+
+func (noopSharedDRAManager) ResourceClaims() framework.ResourceClaimTracker { return noopClaimTracker{} }
+func (noopSharedDRAManager) ResourceSlices() framework.ResourceSliceLister { return noopResourceSliceLister{} }
+func (noopSharedDRAManager) DeviceClasses() framework.DeviceClassLister    { return noopDeviceClassLister{} }
+
+// NewFrameworkHandle creates a framework.Handle for K8s in-tree plugins used by Volcano.
+func NewFrameworkHandle(nodeMap map[string]*framework.NodeInfo, client clientset.Interface, informerFactory informers.SharedInformerFactory) framework.Handle {
 	snapshot := NewSnapshot(nodeMap)
 	return &Framework{
 		snapshot:        snapshot,

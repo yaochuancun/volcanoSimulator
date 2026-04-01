@@ -26,8 +26,8 @@ import (
 	"k8s.io/klog"
 	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpumanager/topology"
-	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 	"k8s.io/kubernetes/pkg/kubelet/cm/topologymanager/bitmask"
+	"k8s.io/utils/cpuset"
 
 	nodeinfov1alpha1 "volcano.sh/apis/pkg/apis/nodeinfo/v1alpha1"
 	"volcano.sh/volcano/pkg/scheduler/api"
@@ -242,7 +242,7 @@ func getNodeNumaNumForTask(nodeInfo []*api.NodeInfo, resAssignMap map[string]api
 
 func getNumaNodeCntForCPUID(cpus cpuset.CPUSet, cpuDetails topology.CPUDetails) int {
 	mask, _ := bitmask.NewBitMask()
-	s := cpus.ToSlice()
+	s := cpus.List()
 
 	for _, cpuID := range s {
 		mask.Add(cpuDetails[cpuID].NUMANodeID)
@@ -273,7 +273,7 @@ func (pp *numaPlugin) OnSessionClose(ssn *framework.Session) {
 		resSet := pp.assignRes[taskID][nodeName]
 		for resName, set := range resSet {
 			if _, existed := allocatedResSet[nodeName][resName]; !existed {
-				allocatedResSet[nodeName][resName] = cpuset.NewCPUSet()
+				allocatedResSet[nodeName][resName] = cpuset.New()
 			}
 
 			allocatedResSet[nodeName][resName] = allocatedResSet[nodeName][resName].Union(set)

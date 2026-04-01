@@ -146,7 +146,7 @@ if __name__ == '__main__':
     _base_dir = os.path.dirname(os.path.abspath(__file__))
     cluster_path = os.path.join(_base_dir, 'input_config', 'cluster', 'cluster_1.yaml')
     workload_path = os.path.join(_base_dir, 'input_config', 'workload', 'workload_1.yaml')
-    plugins_path = os.path.join(_base_dir, 'input_config', 'plugins', 'plugins.yaml')
+    plugins_path = os.path.join(_base_dir, 'input_config', 'plugins', 'plugins_mvp.yaml')
 
     nodes_yaml = load_cluster_for_simulator(cluster_path)
     workload_yaml = load_workload_for_simulator(workload_path)

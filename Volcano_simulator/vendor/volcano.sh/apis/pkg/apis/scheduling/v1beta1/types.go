@@ -21,9 +21,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PodGroupPhase is the phase of a pod group at the current time.
-type PodGroupPhase string
-
 // QueueState is state type of queue.
 type QueueState string
 
@@ -38,13 +35,16 @@ const (
 	QueueStateUnknown QueueState = "Unknown"
 )
 
+// PodGroupPhase is the phase of a pod group at the current time.
+type PodGroupPhase string
+
 // These are the valid phase of podGroups.
 const (
-	// PodPending means the pod group has been accepted by the system, but scheduler can not allocate
+	// PodGroupPending means the pod group has been accepted by the system, but scheduler can not allocate
 	// enough resources to it.
 	PodGroupPending PodGroupPhase = "Pending"
 
-	// PodRunning means `spec.minMember` pods of PodGroups has been in running phase.
+	// PodGroupRunning means `spec.minMember` pods of PodGroup has been in running phase.
 	PodGroupRunning PodGroupPhase = "Running"
 
 	// PodGroupUnknown means part of `spec.minMember` pods are running but the other part can not
@@ -54,6 +54,9 @@ const (
 	// PodGroupInqueue means controllers can start to create pods,
 	// is a new state between PodGroupPending and PodGroupRunning
 	PodGroupInqueue PodGroupPhase = "Inqueue"
+
+	// PodGroupCompleted means all the pods of PodGroup are completed
+	PodGroupCompleted PodGroupPhase = "Completed"
 )
 
 type PodGroupConditionType string
@@ -142,6 +145,11 @@ const (
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=podgroups,shortName=pg;podgroup-v1beta1
+// +kubebuilder:printcolumn:name="STATUS",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="minMember",type=integer,JSONPath=`.spec.minMember`
+// +kubebuilder:printcolumn:name="RUNNINGS",type=integer,JSONPath=`.status.running`
+// +kubebuilder:printcolumn:name="AGE",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="QUEUE",type=string,priority=1,JSONPath=`.spec.queue`
 
 // PodGroup is a collection of Pod; used for batch workload.
 type PodGroup struct {
@@ -176,6 +184,7 @@ type PodGroupSpec struct {
 	// Queue defines the queue to allocate resource for PodGroup; if queue does not exist,
 	// the PodGroup will not be scheduled. Defaults to `default` Queue with the lowest weight.
 	// +optional
+	// +kubebuilder:default:="default"
 	Queue string `json:"queue,omitempty" protobuf:"bytes,2,opt,name=queue"`
 
 	// If specified, indicates the PodGroup's priority. "system-node-critical" and
@@ -191,6 +200,34 @@ type PodGroupSpec struct {
 	// if there's not enough resources to start all tasks, the scheduler
 	// will not start anyone.
 	MinResources *v1.ResourceList `json:"minResources,omitempty" protobuf:"bytes,4,opt,name=minResources"`
+
+	// NetworkTopology defines the NetworkTopology config, this field works in conjunction with network topology feature and hyperNode CRD.
+	// +optional
+	NetworkTopology *NetworkTopologySpec `json:"networkTopology,omitempty" protobuf:"bytes,5,opt,name=networkTopology"`
+}
+
+type NetworkTopologyMode string
+
+const (
+	// HardNetworkTopologyMode represents a strict network topology constraint that jobs must adhere to.
+	HardNetworkTopologyMode NetworkTopologyMode = "hard"
+
+	// SoftNetworkTopologyMode represents a flexible network topology constraint that allows jobs
+	// to cross network boundaries under certain conditions.
+	SoftNetworkTopologyMode NetworkTopologyMode = "soft"
+)
+
+type NetworkTopologySpec struct {
+	// Mode specifies the mode of the network topology constrain.
+	// +kubebuilder:validation:Enum=hard;soft
+	// +kubebuilder:default=hard
+	// +optional
+	Mode NetworkTopologyMode `json:"mode,omitempty" protobuf:"bytes,1,opt,name=mode"`
+
+	// HighestTierAllowed specifies the highest tier that a job allowed to cross when scheduling.
+	// +kubebuilder:default=1
+	// +optional
+	HighestTierAllowed *int `json:"highestTierAllowed,omitempty" protobuf:"bytes,2,opt,name=highestTierAllowed"`
 }
 
 // PodGroupStatus represents the current state of a pod group.
@@ -241,6 +278,7 @@ const (
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path=queues,scope=Cluster,shortName=q;queue-v1beta1
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="PARENT",type=string,JSONPath=`.spec.parent`
 
 // Queue is a queue of PodGroup.
 type Queue struct {
@@ -289,31 +327,89 @@ type QueueStatus struct {
 	Running int32 `json:"running,omitempty" protobuf:"bytes,4,opt,name=running"`
 	// The number of `Inqueue` PodGroup in this queue.
 	Inqueue int32 `json:"inqueue,omitempty" protobuf:"bytes,5,opt,name=inqueue"`
+	// The number of `Completed` PodGroup in this queue.
+	Completed int32 `json:"completed,omitempty" protobuf:"bytes,6,opt,name=completed"`
 
 	// Reservation is the profile of resource reservation for queue
-	Reservation Reservation `json:"reservation,omitempty" protobuf:"bytes,6,opt,name=reservation"`
+	Reservation Reservation `json:"reservation,omitempty" protobuf:"bytes,7,opt,name=reservation"`
+
+	// Allocated is allocated resources in queue
+	// +optional
+	Allocated v1.ResourceList `json:"allocated" protobuf:"bytes,8,opt,name=allocated"`
 }
 
 // CluterSpec represents the template of Cluster
 type Cluster struct {
-	Name string              `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
-	Weight int32             `json:"weight,omitempty" protobuf:"bytes,2,opt,name=weight"`
+	// +optional
+	Name string `json:"name,omitempty" protobuf:"bytes,1,opt,name=name"`
+	// +optional
+	Weight int32 `json:"weight,omitempty" protobuf:"bytes,2,opt,name=weight"`
+	// +optional
 	Capacity v1.ResourceList `json:"capacity,omitempty" protobuf:"bytes,3,opt,name=capacity"`
+}
+
+// Affinity is a group of affinity scheduling rules.
+type Affinity struct {
+	// Describes nodegroup affinity scheduling rules for the queue(e.g. putting pods of the queue in the nodes of the nodegroup)
+	// +optional
+	NodeGroupAffinity *NodeGroupAffinity `json:"nodeGroupAffinity,omitempty" protobuf:"bytes,1,opt,name=nodeGroupAffinity"`
+
+	// Describes nodegroup anti-affinity scheduling rules for the queue(e.g. avoid putting pods of the queue in the nodes of the nodegroup).
+	// +optional
+	NodeGroupAntiAffinity *NodeGroupAntiAffinity `json:"nodeGroupAntiAffinity,omitempty" protobuf:"bytes,2,opt,name=nodeGroupAntiAffinity"`
+}
+
+type NodeGroupAffinity struct {
+	// +optional
+	RequiredDuringSchedulingIgnoredDuringExecution []string `json:"requiredDuringSchedulingIgnoredDuringExecution,omitempty" protobuf:"bytes,1,opt,name=requiredDuringSchedulingIgnoredDuringExecution"`
+	// +optional
+	PreferredDuringSchedulingIgnoredDuringExecution []string `json:"preferredDuringSchedulingIgnoredDuringExecution,omitempty" protobuf:"bytes,2,rep,name=preferredDuringSchedulingIgnoredDuringExecution"`
+}
+
+type NodeGroupAntiAffinity struct {
+	// +optional
+	RequiredDuringSchedulingIgnoredDuringExecution []string `json:"requiredDuringSchedulingIgnoredDuringExecution,omitempty" protobuf:"bytes,1,opt,name=requiredDuringSchedulingIgnoredDuringExecution"`
+	// +optional
+	PreferredDuringSchedulingIgnoredDuringExecution []string `json:"preferredDuringSchedulingIgnoredDuringExecution,omitempty" protobuf:"bytes,2,rep,name=preferredDuringSchedulingIgnoredDuringExecution"`
 }
 
 // QueueSpec represents the template of Queue.
 type QueueSpec struct {
-	Weight     int32           `json:"weight,omitempty" protobuf:"bytes,1,opt,name=weight"`
+	// +optional
+	// +kubebuilder:default:=1
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Weight int32 `json:"weight,omitempty" protobuf:"bytes,1,opt,name=weight"`
+
+	// +optional
 	Capability v1.ResourceList `json:"capability,omitempty" protobuf:"bytes,2,opt,name=capability"`
 
 	// Reclaimable indicate whether the queue can be reclaimed by other queue
 	Reclaimable *bool `json:"reclaimable,omitempty" protobuf:"bytes,3,opt,name=reclaimable"`
 
-    // extendCluster indicate the jobs in this Queue will be dispatched to these clusters.
+	// extendCluster indicate the jobs in this Queue will be dispatched to these clusters.
 	ExtendClusters []Cluster `json:"extendClusters,omitempty" protobuf:"bytes,4,opt,name=extendClusters"`
 
 	// Guarantee indicate configuration about resource reservation
-	Guarantee Guarantee `json:"guarantee,omitempty" protobuf:"bytes,4,opt,name=guarantee"`
+	Guarantee Guarantee `json:"guarantee,omitempty" protobuf:"bytes,5,opt,name=guarantee"`
+
+	// If specified, the pod owned by the queue will be scheduled with constraint
+	// +optional
+	Affinity *Affinity `json:"affinity,omitempty" protobuf:"bytes,6,opt,name=affinity"`
+
+	// Type define the type of queue
+	Type string `json:"type,omitempty" protobuf:"bytes,7,opt,name=type"`
+	// Parent define the parent of queue
+	// +optional
+	Parent string `json:"parent,omitempty" protobuf:"bytes,8,opt,name=parent"`
+
+	// The amount of resources configured by the user. This part of resource can be shared with other queues and reclaimed back.
+	// +optional
+	Deserved v1.ResourceList `json:"deserved,omitempty" protobuf:"bytes,9,opt,name=deserved"`
+
+	// Priority define the priority of queue. Higher values are prioritized for scheduling and considered later during reclamation.
+	// +optional
+	Priority int32 `json:"priority,omitempty" protobuf:"bytes,10,opt,name=priority"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

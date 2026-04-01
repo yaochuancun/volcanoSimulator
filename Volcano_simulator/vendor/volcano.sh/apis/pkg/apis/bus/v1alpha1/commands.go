@@ -14,9 +14,11 @@ type Command struct {
 	metav1.ObjectMeta `json:"metadata,omitempty" protobuf:"bytes,1,opt,name=metadata"`
 
 	// Action defines the action that will be took to the target object.
+	// +optional
 	Action string `json:"action,omitempty" protobuf:"bytes,2,opt,name=action"`
 
 	// TargetObject defines the target object of this command.
+	// +optional
 	TargetObject *metav1.OwnerReference `json:"target,omitempty" protobuf:"bytes,3,opt,name=target"`
 
 	// Unique, one-word, CamelCase reason for this command.
@@ -25,7 +27,7 @@ type Command struct {
 
 	// Human-readable message indicating details of this command.
 	// +optional
-	Message string `json:"message,omitempty" protobuf:"bytes,4,opt,name=message"`
+	Message string `json:"message,omitempty" protobuf:"bytes,5,opt,name=message"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

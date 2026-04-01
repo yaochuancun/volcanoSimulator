@@ -29,6 +29,11 @@ import (
 // +kubebuilder:subresource:status
 
 // Job defines the volcano job.
+// +kubebuilder:printcolumn:name="STATUS",type=string,JSONPath=`.status.state.phase`
+// +kubebuilder:printcolumn:name="minAvailable",type=integer,JSONPath=`.status.minAvailable`
+// +kubebuilder:printcolumn:name="RUNNINGS",type=integer,JSONPath=`.status.running`
+// +kubebuilder:printcolumn:name="AGE",type=date,JSONPath=`.metadata.creationTimestamp`
+// +kubebuilder:printcolumn:name="QUEUE",type=string,priority=1,JSONPath=`.spec.queue`
 type Job struct {
 	metav1.TypeMeta `json:",inline"`
 
@@ -82,6 +87,7 @@ type JobSpec struct {
 
 	// Specifies the maximum number of retries before marking this Job failed.
 	// Defaults to 3.
+	// +kubebuilder:default:=3
 	// +optional
 	MaxRetry int32 `json:"maxRetry,omitempty" protobuf:"bytes,9,opt,name=maxRetry"`
 
@@ -102,6 +108,35 @@ type JobSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	// +optional
 	MinSuccess *int32 `json:"minSuccess,omitempty" protobuf:"varint,12,opt,name=minSuccess"`
+
+	// NetworkTopology defines the NetworkTopology config, this field works in conjunction with network topology feature and hyperNode CRD.
+	// +optional
+	NetworkTopology *NetworkTopologySpec `json:"networkTopology,omitempty" protobuf:"bytes,13,opt,name=networkTopology"`
+}
+
+// NetworkTopologyMode represents the networkTopology mode, valid values are "hard" and "soft".
+// +kubebuilder:validation:Enum=hard;soft
+type NetworkTopologyMode string
+
+const (
+	// HardNetworkTopologyMode represents a strict network topology constraint that jobs must adhere to.
+	HardNetworkTopologyMode NetworkTopologyMode = "hard"
+
+	// SoftNetworkTopologyMode represents a flexible network topology constraint that allows jobs
+	// to cross network boundaries under certain conditions.
+	SoftNetworkTopologyMode NetworkTopologyMode = "soft"
+)
+
+type NetworkTopologySpec struct {
+	// Mode specifies the mode of the network topology constrain.
+	// +kubebuilder:default=hard
+	// +optional
+	Mode NetworkTopologyMode `json:"mode,omitempty" protobuf:"bytes,1,opt,name=mode"`
+
+	// HighestTierAllowed specifies the highest tier that a job allowed to cross when scheduling.
+	// +kubebuilder:default=1
+	// +optional
+	HighestTierAllowed *int `json:"highestTierAllowed,omitempty" protobuf:"bytes,2,opt,name=highestTierAllowed"`
 }
 
 // VolumeSpec defines the specification of Volume, e.g. PVC.
@@ -169,6 +204,7 @@ type LifecyclePolicy struct {
 	Timeout *metav1.Duration `json:"timeout,omitempty" protobuf:"bytes,5,opt,name=timeout"`
 }
 
+// +kubebuilder:validation:Enum=none;best-effort;restricted;single-numa-node
 type NumaPolicy string
 
 const (

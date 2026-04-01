@@ -1,5 +1,5 @@
 /*
-Copyright 2021 The Volcano Authors.
+Copyright The Volcano Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@ limitations under the License.
 package v1beta1
 
 import (
-	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/tools/cache"
-	v1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
+	labels "k8s.io/apimachinery/pkg/labels"
+	listers "k8s.io/client-go/listers"
+	cache "k8s.io/client-go/tools/cache"
+	schedulingv1beta1 "volcano.sh/apis/pkg/apis/scheduling/v1beta1"
 )
 
 // PodGroupLister helps list PodGroups.
@@ -29,7 +29,7 @@ import (
 type PodGroupLister interface {
 	// List lists all PodGroups in the indexer.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.PodGroup, err error)
+	List(selector labels.Selector) (ret []*schedulingv1beta1.PodGroup, err error)
 	// PodGroups returns an object that can list and get PodGroups.
 	PodGroups(namespace string) PodGroupNamespaceLister
 	PodGroupListerExpansion
@@ -37,25 +37,17 @@ type PodGroupLister interface {
 
 // podGroupLister implements the PodGroupLister interface.
 type podGroupLister struct {
-	indexer cache.Indexer
+	listers.ResourceIndexer[*schedulingv1beta1.PodGroup]
 }
 
 // NewPodGroupLister returns a new PodGroupLister.
 func NewPodGroupLister(indexer cache.Indexer) PodGroupLister {
-	return &podGroupLister{indexer: indexer}
-}
-
-// List lists all PodGroups in the indexer.
-func (s *podGroupLister) List(selector labels.Selector) (ret []*v1beta1.PodGroup, err error) {
-	err = cache.ListAll(s.indexer, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.PodGroup))
-	})
-	return ret, err
+	return &podGroupLister{listers.New[*schedulingv1beta1.PodGroup](indexer, schedulingv1beta1.Resource("podgroup"))}
 }
 
 // PodGroups returns an object that can list and get PodGroups.
 func (s *podGroupLister) PodGroups(namespace string) PodGroupNamespaceLister {
-	return podGroupNamespaceLister{indexer: s.indexer, namespace: namespace}
+	return podGroupNamespaceLister{listers.NewNamespaced[*schedulingv1beta1.PodGroup](s.ResourceIndexer, namespace)}
 }
 
 // PodGroupNamespaceLister helps list and get PodGroups.
@@ -63,36 +55,15 @@ func (s *podGroupLister) PodGroups(namespace string) PodGroupNamespaceLister {
 type PodGroupNamespaceLister interface {
 	// List lists all PodGroups in the indexer for a given namespace.
 	// Objects returned here must be treated as read-only.
-	List(selector labels.Selector) (ret []*v1beta1.PodGroup, err error)
+	List(selector labels.Selector) (ret []*schedulingv1beta1.PodGroup, err error)
 	// Get retrieves the PodGroup from the indexer for a given namespace and name.
 	// Objects returned here must be treated as read-only.
-	Get(name string) (*v1beta1.PodGroup, error)
+	Get(name string) (*schedulingv1beta1.PodGroup, error)
 	PodGroupNamespaceListerExpansion
 }
 
 // podGroupNamespaceLister implements the PodGroupNamespaceLister
 // interface.
 type podGroupNamespaceLister struct {
-	indexer   cache.Indexer
-	namespace string
-}
-
-// List lists all PodGroups in the indexer for a given namespace.
-func (s podGroupNamespaceLister) List(selector labels.Selector) (ret []*v1beta1.PodGroup, err error) {
-	err = cache.ListAllByNamespace(s.indexer, s.namespace, selector, func(m interface{}) {
-		ret = append(ret, m.(*v1beta1.PodGroup))
-	})
-	return ret, err
-}
-
-// Get retrieves the PodGroup from the indexer for a given namespace and name.
-func (s podGroupNamespaceLister) Get(name string) (*v1beta1.PodGroup, error) {
-	obj, exists, err := s.indexer.GetByKey(s.namespace + "/" + name)
-	if err != nil {
-		return nil, err
-	}
-	if !exists {
-		return nil, errors.NewNotFound(v1beta1.Resource("podgroup"), name)
-	}
-	return obj.(*v1beta1.PodGroup), nil
+	listers.ResourceIndexer[*schedulingv1beta1.PodGroup]
 }
