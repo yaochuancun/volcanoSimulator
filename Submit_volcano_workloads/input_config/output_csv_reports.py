@@ -135,6 +135,10 @@ def _chip_json_core(chip_share: Mapping[str, Mapping[str, float]]) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
+# Node_desc 中 flex 资源展示量级：与调度器内部 ScalarResources 一致的量除以该系数写入 CSV（分配率不变）。
+_NODE_DESC_FLEX_SCALE = 1000.0
+
+
 def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
     """写节点级 FlexNPU 已分配/总量与分配率。"""
     rows: List[List[str]] = [
@@ -152,10 +156,10 @@ def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
             continue
         used = ninfo.get("Used") or ninfo.get("used")
         alloc = ninfo.get("Allocatable") or ninfo.get("allocatable")
-        u_c = _scalar_from_resource(used, CORE_RES)
-        u_m = _scalar_from_resource(used, MEM_RES)
-        a_c = _scalar_from_resource(alloc, CORE_RES)
-        a_m = _scalar_from_resource(alloc, MEM_RES)
+        u_c = _scalar_from_resource(used, CORE_RES) / _NODE_DESC_FLEX_SCALE
+        u_m = _scalar_from_resource(used, MEM_RES) / _NODE_DESC_FLEX_SCALE
+        a_c = _scalar_from_resource(alloc, CORE_RES) / _NODE_DESC_FLEX_SCALE
+        a_m = _scalar_from_resource(alloc, MEM_RES) / _NODE_DESC_FLEX_SCALE
         rows.append(
             [
                 str(nname),

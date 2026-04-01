@@ -17,6 +17,9 @@ FLEXNPU_NUM_ANN = "volcano.sh/flexnpu-num"
 CORE_LIST_ANN = "volcano.sh/flexnpu-core.percentage-list"
 MEM_LIST_ANN = "volcano.sh/flexnpu-memory.128mi-list"
 
+# 与 Volcano ScalarResources（MilliValue）及 Node_desc.csv 展示一致：节点汇总里 used/alloc 除以该系数。
+_FLEX_NODE_AGG_DISPLAY_SCALE = 1000.0
+
 
 def _parse_json_map(s: Optional[str]) -> Dict[str, float]:
     if not s or not str(s).strip():
@@ -248,10 +251,10 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
             continue
         used = ninfo.get("Used") or ninfo.get("used")
         alloc = ninfo.get("Allocatable") or ninfo.get("allocatable")
-        u_c = _scalar_from_resource(used, CORE_RES)
-        u_m = _scalar_from_resource(used, MEM_RES)
-        a_c = _scalar_from_resource(alloc, CORE_RES)
-        a_m = _scalar_from_resource(alloc, MEM_RES)
+        u_c = _scalar_from_resource(used, CORE_RES) / _FLEX_NODE_AGG_DISPLAY_SCALE
+        u_m = _scalar_from_resource(used, MEM_RES) / _FLEX_NODE_AGG_DISPLAY_SCALE
+        a_c = _scalar_from_resource(alloc, CORE_RES) / _FLEX_NODE_AGG_DISPLAY_SCALE
+        a_m = _scalar_from_resource(alloc, MEM_RES) / _FLEX_NODE_AGG_DISPLAY_SCALE
         pct_c = (100.0 * u_c / a_c) if a_c > 1e-9 else 0.0
         pct_m = (100.0 * u_m / a_m) if a_m > 1e-9 else 0.0
         lines.append(
