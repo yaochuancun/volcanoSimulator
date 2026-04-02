@@ -32,10 +32,14 @@ def _fmt_frac(used: float, total: float) -> str:
     return f"{used:.2f}/{total:.2f}"
 
 
-def _fmt_pct(used: float, total: float) -> str:
+def _fmt_node_desc_rate(used: float, total: float) -> str:
+    """Node_desc 比率列：0–100 的数值，不带 %；整数显示为整数（如 100）。"""
     if total < 1e-9:
-        return "0.00%"
-    return f"{100.0 * used / total:.2f}%"
+        return "0"
+    pct = 100.0 * used / total
+    if abs(pct - round(pct)) < 1e-6:
+        return str(int(round(pct)))
+    return f"{pct:.2f}"
 
 
 def _fmt_scalar_cell(v: float) -> str:
@@ -212,12 +216,12 @@ def write_node_desc_csv(
                 str(nname),
                 _fmt_frac(u_c, a_c),
                 _fmt_frac(u_m, a_m),
-                _fmt_pct(u_c, a_c),
-                _fmt_pct(u_m, a_m),
+                _fmt_node_desc_rate(u_c, a_c),
+                _fmt_node_desc_rate(u_m, a_m),
                 _fmt_frac(eu_c_d, et_c_d),
                 _fmt_frac(eu_m_d, et_m_d),
-                _fmt_pct(eu_c_d, et_c_d),
-                _fmt_pct(eu_m_d, et_m_d),
+                _fmt_node_desc_rate(eu_c_d, et_c_d),
+                _fmt_node_desc_rate(eu_m_d, et_m_d),
             ]
         )
     with open(path, "w", encoding="utf-8", newline="") as f:
