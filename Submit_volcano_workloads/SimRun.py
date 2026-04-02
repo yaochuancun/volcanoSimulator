@@ -11,6 +11,7 @@ from input_config.input_config_loader import (
     load_cluster_for_simulator,
     load_plugins_for_simulator,
     load_workload_for_simulator,
+    workload_npu_granularity_percent_from_file,
 )
 import time
 import csv
@@ -44,9 +45,17 @@ def reset(sim_base_url, nodes_yaml, workload_yaml):
         #print(dumps(dicData["nodes"], indent=4))
         #print(_get_key_or_empty(dicData, "nodes"))
 
-def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
+def step(
+    sim_base_url,
+    scheduler_conf_yaml,
+    pods_result_url,
+    npu_granularity_percent: float = 0.0,
+):
     """调用 /step 推进调度，轮询 /stepResult 直至有有效快照；将 Pod 列表、阶段统计、
     FlexNPU 利用率及统计 CSV 写入 ``pods_result_url`` 目录。
+
+    ``npu_granularity_percent`` 与 workload YAML 的 ``spec.npuGranularityPercent`` 一致时，
+    逐卡估算仅对 **flexnpu_core** 做相同粒度上取整（memory 不取整）。
     """
     client = JsonHttpClient(sim_base_url)
 
@@ -73,6 +82,9 @@ def step(sim_base_url, scheduler_conf_yaml, pods_result_url):
             continue
         else:
             print("---Simulation Start---")
+            if isinstance(resultdata, dict):
+                resultdata = {**resultdata}
+                resultdata["npuGranularityPercent"] = float(npu_granularity_percent or 0.0)
             pod_result = os.path.join(pods_result_url, 'tasksSUM.csv')
             phase_summary_path = os.path.join(pods_result_url, phase_summary_path_name)
 
@@ -150,6 +162,7 @@ if __name__ == '__main__':
 
     nodes_yaml = load_cluster_for_simulator(cluster_path)
     workload_yaml = load_workload_for_simulator(workload_path)
+    npu_granularity = workload_npu_granularity_percent_from_file(workload_path)
     scheduler_conf_yaml, result_root = load_plugins_for_simulator(plugins_path)
 
     os.makedirs(result_root, exist_ok=True)
@@ -165,7 +178,7 @@ if __name__ == '__main__':
     print("-----------------------------------------------------------------")
     reset(sim_base_url, nodes_yaml, workload_yaml)
     time.sleep(1)
-    step(sim_base_url, scheduler_conf_yaml, pods_result_url)
+    step(sim_base_url, scheduler_conf_yaml, pods_result_url, npu_granularity)
     time.sleep(1)
     print("-----------------------------------------------------------------")
 

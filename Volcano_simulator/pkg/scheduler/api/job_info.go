@@ -528,15 +528,22 @@ func NewJobInfoV2(job *batch.Job) *JobInfo{
 	jobInfo.UID = JobID(fmt.Sprintf("%s/%s", jobInfo.Namespace, job.ObjectMeta.Name))
 	//创建Replicas个task
 	for i:=int32(0);i<job.Spec.Tasks[0].Replicas;i++{
+		tmpl := job.Spec.Tasks[0].Template
+		podAnn := make(map[string]string)
+		if tmpl.Annotations != nil {
+			for k, v := range tmpl.Annotations {
+				podAnn[k] = v
+			}
+		}
+		// 保证与 Volcano 一致：group 注解覆盖模板中同名键
+		podAnn[v1beta1.KubeGroupNameAnnotationKey] = job.ObjectMeta.Name //jobName做groupName，这个label在NewTaskInfo中用到，{namespace/job.ObjectMeta.Name}做task中的jobId
 		pod:=&v1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				UID:       types.UID(fmt.Sprintf("%v-%v-%v-%v", job.ObjectMeta.Namespace,job.ObjectMeta.Name,job.Spec.Tasks[0].Name, i)),
 				Name:      fmt.Sprintf("%v-%v-%v-%v", job.ObjectMeta.Namespace,job.ObjectMeta.Name,job.Spec.Tasks[0].Name, i),
 				Namespace: job.ObjectMeta.Namespace,
-				Labels:    job.Spec.Tasks[0].Template.Labels,
-				Annotations: map[string]string{
-					v1beta1.KubeGroupNameAnnotationKey: job.ObjectMeta.Name, //jobName做groupName，这个label在NewTaskInfo中用到，{namespace/job.ObjectMeta.Name}做task中的jobId
-				},
+				Labels:    tmpl.Labels,
+				Annotations: podAnn,
 			},
 			Status: v1.PodStatus{
 				Phase: v1.PodPending,

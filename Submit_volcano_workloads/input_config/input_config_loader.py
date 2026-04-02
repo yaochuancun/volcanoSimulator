@@ -5,15 +5,19 @@
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import yaml
 
 _FLEXNPU_CORE_KEY = "volcano.sh/flexnpu-core.percentage"
-_FLEXNPU_MEM_KEY = "volcano.sh/flexnpu-memory.128mi"
+# 与 flexnpu_util_report 一致：取整前各容器 flexnpu_core（requests 优先），供利用率统计
+FLEXNPU_CORE_RAW_BY_CONTAINER_ANN = (
+    "volcano.sh/flexnpu-core.percentage-raw-by-container"
+)
 
 
 def _ceil_to_step(value: float, step: float) -> float:
@@ -26,26 +30,30 @@ def _ceil_to_step(value: float, step: float) -> float:
 def _round_resource_map(
     resources: Optional[Dict[str, Any]], granularity_percent: float
 ) -> None:
-    """就地按粒度向上取整 flexnpu core/memory 请求/限制字段。"""
+    """就地按粒度向上取整 **flexnpu_core** 请求/限制；flexnpu_memory 不参与粒度舍入。"""
     if not resources or granularity_percent <= 0:
         return
-    for key in (_FLEXNPU_CORE_KEY, _FLEXNPU_MEM_KEY):
-        if key not in resources:
-            continue
-        raw = resources[key]
-        try:
-            v = float(raw)
-        except (TypeError, ValueError):
-            continue
-        rounded = _ceil_to_step(v, float(granularity_percent))
-        if rounded == int(rounded):
-            resources[key] = str(int(rounded))
-        else:
-            resources[key] = str(rounded)
+    key = _FLEXNPU_CORE_KEY
+    if key not in resources:
+        return
+    raw = resources[key]
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return
+    rounded = _ceil_to_step(v, float(granularity_percent))
+    if rounded == int(rounded):
+        resources[key] = str(int(rounded))
+    else:
+        resources[key] = str(rounded)
 
 
 def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity: float) -> None:
-    """规范 task 结构为 template.spec，并对容器资源做 flex 粒度舍入。"""
+    """规范 task 结构为 template.spec，并对容器 flexnpu_core 请求/限制做粒度舍入。
+
+    当 granularity > 0 时，将各容器 **取整前** 的 flexnpu_core 写入 Pod 注解
+    ``FLEXNPU_CORE_RAW_BY_CONTAINER_ANN``（JSON：容器名 -> 数值），便于报表中利用率与分配率区分。
+    """
     if not tasks:
         return
     for task in tasks:
@@ -53,10 +61,45 @@ def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity
             task["template"] = {"spec": task.pop("spec")}
         tmpl = task.get("template") or {}
         pod_spec = tmpl.get("spec") or {}
-        for container in pod_spec.get("containers") or []:
-            res = container.get("resources") or {}
-            _round_resource_map(res.get("requests"), granularity)
-            _round_resource_map(res.get("limits"), granularity)
+        if granularity and float(granularity) > 0:
+            g = float(granularity)
+            raw_by_c: Dict[str, float] = {}
+            for container in pod_spec.get("containers") or []:
+                if not isinstance(container, dict):
+                    continue
+                cname = str(container.get("name") or "__default__")
+                res = container.get("resources") or {}
+                for rk in ("requests", "limits"):
+                    m = res.get(rk)
+                    if not isinstance(m, dict) or _FLEXNPU_CORE_KEY not in m:
+                        continue
+                    try:
+                        v = float(m[_FLEXNPU_CORE_KEY])
+                    except (TypeError, ValueError):
+                        continue
+                    rounded = _ceil_to_step(v, g)
+                    if rk == "requests":
+                        raw_by_c[cname] = v
+                    elif cname not in raw_by_c:
+                        raw_by_c[cname] = v
+                    if rounded == int(rounded):
+                        m[_FLEXNPU_CORE_KEY] = str(int(rounded))
+                    else:
+                        m[_FLEXNPU_CORE_KEY] = str(rounded)
+            if raw_by_c:
+                # Pod 注解在 Volcano 中为 template.metadata，须与仿真器 NewJobInfoV2 合并到 Pod 一致
+                meta = tmpl.setdefault("metadata", {})
+                ann = meta.setdefault("annotations", {})
+                ann[FLEXNPU_CORE_RAW_BY_CONTAINER_ANN] = json.dumps(
+                    raw_by_c, ensure_ascii=False
+                )
+        else:
+            for container in pod_spec.get("containers") or []:
+                if not isinstance(container, dict):
+                    continue
+                res = container.get("resources") or {}
+                _round_resource_map(res.get("requests"), 0)
+                _round_resource_map(res.get("limits"), 0)
 
 
 def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
@@ -87,7 +130,7 @@ def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
 def workload_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
     """将 workload 文档转为仅含顶层 ``jobs:`` 的仿真器 YAML。
 
-    - 按 ``spec.npuGranularityPercent`` 将 flexnpu request/limit 向上取整到粒度步长；
+    - 按 ``spec.npuGranularityPercent`` 将 **flexnpu_core** request/limit 向上取整到粒度步长（memory 不取整）；
     - 将 ``tasks[].spec`` 映射为 Volcano Job 兼容的 ``tasks[].template.spec``。
     """
     spec_root = doc.get("spec") or {}
@@ -115,6 +158,23 @@ def load_cluster_for_simulator(path: str) -> str:
     if not isinstance(doc, dict):
         raise ValueError("cluster config must be a YAML mapping")
     return cluster_input_to_simulator_yaml(doc)
+
+
+def workload_npu_granularity_percent(doc: Mapping[str, Any]) -> float:
+    """读取 workload 文档顶层 ``spec.npuGranularityPercent``（与 ``workload_input_to_simulator_yaml`` 一致）。"""
+    try:
+        return float((doc.get("spec") or {}).get("npuGranularityPercent") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def workload_npu_granularity_percent_from_file(path: str) -> float:
+    """从 workload YAML 文件读取 ``npuGranularityPercent``；非法或缺失时返回 0。"""
+    with open(path, "r", encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+    if not isinstance(doc, dict):
+        return 0.0
+    return workload_npu_granularity_percent(doc)
 
 
 def load_workload_for_simulator(path: str) -> str:

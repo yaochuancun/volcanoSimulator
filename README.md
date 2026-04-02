@@ -10,7 +10,7 @@
 
 - **配置驱动仿真**（配置位于 `Submit_volcano_workloads/input_config/`）  
   - **集群**：`cluster/*.yaml` 描述节点、FlexNPU 注解（如 `flexnpu-core.percentage-list`、`flexnpu-memory.128mi-list`、`topologies`）及可调度资源。  
-  - **负载**：`workload/*.yaml` 描述 Volcano Job 列表，支持 `npuGranularityPercent`（对 flexnpu request/limit 按粒度上取整）、`volcano.sh/flexnpu-num` 等。  
+  - **负载**：`workload/*.yaml` 描述 Volcano Job 列表，支持 `npuGranularityPercent`（仅对 **flexnpu_core** 的 request/limit 按粒度上取整；memory 不取整）、`volcano.sh/flexnpu-num` 等。  
   - **调度**：`plugins/*.yaml` 中的 `scheduler` 块（actions、tiers、插件参数）会作为调度器配置下发；`output.outDir` 中的 `{date}` 会展开为时间戳，用于结果根目录。
 
 - **与仿真器交互**  

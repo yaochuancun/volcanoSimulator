@@ -139,8 +139,39 @@ def _chip_json_core(chip_share: Mapping[str, Mapping[str, float]]) -> str:
 _NODE_DESC_FLEX_SCALE = 1000.0
 
 
-def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
-    """写节点级 FlexNPU 已分配/总量与分配率。"""
+def _node_card_used_and_caps(
+    nname: str,
+    ninfo: Mapping[str, Any],
+    card_used_core: Mapping[Tuple[str, str], float],
+    card_used_mem: Mapping[Tuple[str, str], float],
+) -> Tuple[float, float, float, float]:
+    """按节点汇总：逐卡估算用量之和与注解容量之和 (core_used, core_cap, mem_used, mem_cap)。"""
+    ann = _node_annotations(ninfo)
+    ids, cap_c, cap_m = _card_caps_sorted(ann)
+    nn = str(nname)
+    su_c, tot_c = 0.0, 0.0
+    su_m, tot_m = 0.0, 0.0
+    for cid in ids:
+        ck = str(cid)
+        su_c += float(card_used_core.get((nn, ck), 0.0))
+        su_m += float(card_used_mem.get((nn, ck), 0.0))
+        tot_c += float(cap_c.get(ck, cap_c.get(cid, 0.0)))
+        tot_m += float(cap_m.get(ck, cap_m.get(cid, 0.0)))
+    return su_c, tot_c, su_m, tot_m
+
+
+def write_node_desc_csv(
+    nodes: Mapping[str, Any],
+    card_used_core_raw: Mapping[Tuple[str, str], float],
+    card_used_mem_raw: Mapping[Tuple[str, str], float],
+    path: str,
+) -> None:
+    """写节点级 FlexNPU。
+
+    - **分配**（allocated / allocation_rate）：调度器 ``NodeInfo`` 的 Used/Allocatable（含业务粒度在调度侧的记账）。
+    - **利用**（utilized / utilization_rate）：按 Pod spec **原始** flex request 分卡汇总（未再做粒度上取整）；
+      量级与 Pod/节点注解中的 flex 数值一致，**不再**除以 ``_NODE_DESC_FLEX_SCALE``（该系数仅用于调度器 ScalarResources 与 allocated 列）。
+    """
     rows: List[List[str]] = [
         [
             "node_name",
@@ -148,6 +179,10 @@ def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
             "flexnpu_memory_allocated/total",
             "flexnpu_core_allocation_rate",
             "flexnpu_memory_allocation_rate",
+            "flexnpu_core_utilized/total",
+            "flexnpu_memory_utilized/total",
+            "flexnpu_core_utilization_rate",
+            "flexnpu_memory_utilization_rate",
         ]
     ]
     for nname in sorted(nodes.keys()):
@@ -160,6 +195,18 @@ def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
         u_m = _scalar_from_resource(used, MEM_RES) / _NODE_DESC_FLEX_SCALE
         a_c = _scalar_from_resource(alloc, CORE_RES) / _NODE_DESC_FLEX_SCALE
         a_m = _scalar_from_resource(alloc, MEM_RES) / _NODE_DESC_FLEX_SCALE
+
+        eu_c, et_c, eu_m, et_m = _node_card_used_and_caps(
+            str(nname), ninfo, card_used_core_raw, card_used_mem_raw
+        )
+        # 与 allocated 列（/1000 后的调度器标量）同量级：注解容量之和通常已与 a_c 一致；勿再对逐卡估算除 1000
+        eu_c_d, et_c_d = eu_c, et_c
+        eu_m_d, et_m_d = eu_m, et_m
+        if et_c < 1e-9:
+            et_c_d = a_c
+        if et_m < 1e-9:
+            et_m_d = a_m
+
         rows.append(
             [
                 str(nname),
@@ -167,6 +214,10 @@ def write_node_desc_csv(nodes: Mapping[str, Any], path: str) -> None:
                 _fmt_frac(u_m, a_m),
                 _fmt_pct(u_c, a_c),
                 _fmt_pct(u_m, a_m),
+                _fmt_frac(eu_c_d, et_c_d),
+                _fmt_frac(eu_m_d, et_m_d),
+                _fmt_pct(eu_c_d, et_c_d),
+                _fmt_pct(eu_m_d, et_m_d),
             ]
         )
     with open(path, "w", encoding="utf-8", newline="") as f:
@@ -181,14 +232,14 @@ def write_pod_desc_csv(
 ) -> None:
     """写 Running/Binding/Pending Pod 的描述行（含 flex 请求、创建时间、占卡 JSON）。"""
     header = [
-        "当前节点",
-        "命名空间",
-        "Pod名称",
-        "flexnpu-core请求",
-        "flexnpu-memory请求",
-        "状态",
-        "创建时间",
-        "占用卡和容量",
+        "node_name",
+        "namespace",
+        "pod_name",
+        "flexnpu_core_request",
+        "flexnpu_memory_request",
+        "phase",
+        "created_at",
+        "card_used_quantity",
     ]
     rows: List[List[str]] = [header]
 
@@ -247,26 +298,58 @@ def write_pod_desc_csv(
 
 def write_npu_chip_csv(
     nodes: Mapping[str, Any],
-    card_used_core: Mapping[Tuple[str, str], float],
+    card_used_core_raw: Mapping[Tuple[str, str], float],
+    card_used_mem_raw: Mapping[Tuple[str, str], float],
+    card_used_core_gran: Mapping[Tuple[str, str], float],
+    card_used_mem_gran: Mapping[Tuple[str, str], float],
     path: str,
 ) -> None:
-    """按节点、按卡写入估算利用率（基于注解容量与 estimate_card_usage 结果）。"""
-    rows: List[List[str]] = [["节点名称", "卡名", "利用率"]]
+    """按节点、按卡写入 flexnpu core/memory 的利用率与分配率（百分比，0–100）。
+
+    core：分配率为粒度上取整后的分卡量/容量，利用率为原始分卡量/容量。
+    memory：不参与 ``npuGranularityPercent``，分配与利用相同（两列数值一致）。
+    """
+    rows: List[List[str]] = [
+        [
+            "node_name",
+            "card_id",
+            "flexnpu_core_allocation_rate",
+            "flexnpu_core_utilization_rate",
+            "flexnpu_memory_allocation_rate",
+            "flexnpu_memory_utilization_rate",
+        ]
+    ]
     for nname in sorted(nodes.keys()):
         ninfo = nodes[nname]
         if not isinstance(ninfo, dict):
             continue
         ann = _node_annotations(ninfo)
-        ids, cap_c, _cap_m = _card_caps_sorted(ann)
+        ids, cap_c, cap_m = _card_caps_sorted(ann)
         if not ids:
             continue
         nn = str(nname)
         for cid in ids:
             ck = str(cid)
             ccap = cap_c.get(ck, cap_c.get(cid, 0.0))
-            uc = float(card_used_core.get((nn, ck), 0.0))
-            util = (100.0 * uc / ccap) if ccap > 1e-9 else 0.0
-            rows.append([nn, ck, f"{util:.2f}"])
+            mcap = cap_m.get(ck, cap_m.get(cid, 0.0))
+            uc_r = float(card_used_core_raw.get((nn, ck), 0.0))
+            uc_g = float(card_used_core_gran.get((nn, ck), 0.0))
+            um_r = float(card_used_mem_raw.get((nn, ck), 0.0))
+            um_g = float(card_used_mem_gran.get((nn, ck), 0.0))
+            pc_util = (100.0 * uc_r / ccap) if ccap > 1e-9 else 0.0
+            pc_alloc = (100.0 * uc_g / ccap) if ccap > 1e-9 else 0.0
+            pm_util = (100.0 * um_r / mcap) if mcap > 1e-9 else 0.0
+            pm_alloc = (100.0 * um_g / mcap) if mcap > 1e-9 else 0.0
+            rows.append(
+                [
+                    nn,
+                    ck,
+                    f"{pc_alloc:.2f}",
+                    f"{pc_util:.2f}",
+                    f"{pm_alloc:.2f}",
+                    f"{pm_util:.2f}",
+                ]
+            )
     with open(path, "w", encoding="utf-8", newline="") as f:
         csv.writer(f).writerows(rows)
 
@@ -304,7 +387,10 @@ def write_output_config_csvs(resultdata: Mapping[str, Any], output_dir: str) -> 
         return
     nodes = snap["nodes"]
     jobs = snap["jobs"]
-    card_used_core = snap["card_used_core"]
+    card_used_core_raw = snap["card_used_core_raw"]
+    card_used_mem_raw = snap["card_used_mem_raw"]
+    card_used_core_gran = snap["card_used_core_gran"]
+    card_used_mem_gran = snap["card_used_mem_gran"]
     pod_chip_share = snap["pod_chip_share"]
 
     sim_clock = str(
@@ -313,12 +399,24 @@ def write_output_config_csvs(resultdata: Mapping[str, Any], output_dir: str) -> 
         or ""
     )
 
-    write_node_desc_csv(nodes, os.path.join(output_dir, "Node_desc.csv"))
+    write_node_desc_csv(
+        nodes,
+        card_used_core_raw,
+        card_used_mem_raw,
+        os.path.join(output_dir, "Node_desc.csv"),
+    )
     write_pod_desc_csv(
         jobs,
         pod_chip_share,
         os.path.join(output_dir, "POD_desc.csv"),
         sim_clock=sim_clock,
     )
-    write_npu_chip_csv(nodes, card_used_core, os.path.join(output_dir, "npu_chip.csv"))
+    write_npu_chip_csv(
+        nodes,
+        card_used_core_raw,
+        card_used_mem_raw,
+        card_used_core_gran,
+        card_used_mem_gran,
+        os.path.join(output_dir, "npu_chip.csv"),
+    )
     write_summary_csv(nodes, jobs, os.path.join(output_dir, "summary.csv"))

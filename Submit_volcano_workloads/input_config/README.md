@@ -5,7 +5,7 @@ Sample **cluster**, **workload**, and **plugins** inputs. Each file lives in its
 | Path | Role |
 | --- | --- |
 | `cluster/cluster.yaml` | Node list + FlexNPU topology |
-| `workload/workload.yaml` | Volcano JobList + `npuGranularityPercent` |
+| `workload/workload.yaml` | Volcano JobList + `npuGranularityPercent`（仅对 flexnpu_core 上取整） |
 | `plugins/plugins.yaml` | Scheduler plugin tiers + `output` (semantic only for HTTP mode) |
 | `plugins/plugins_mvp.yaml` | MVP sample **without `gang`** (matches current simulator scope) |
 

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping, Optional, Set, Tuple
 
@@ -16,6 +17,10 @@ MEM_RES = "volcano.sh/flexnpu-memory.128mi"
 FLEXNPU_NUM_ANN = "volcano.sh/flexnpu-num"
 CORE_LIST_ANN = "volcano.sh/flexnpu-core.percentage-list"
 MEM_LIST_ANN = "volcano.sh/flexnpu-memory.128mi-list"
+# 与 input_config_loader 写入一致：取整前各容器 flexnpu_core（JSON），用于利用率与分配率区分
+FLEXNPU_CORE_RAW_BY_CONTAINER_ANN = (
+    "volcano.sh/flexnpu-core.percentage-raw-by-container"
+)
 
 # 与 Volcano ScalarResources（MilliValue）及 Node_desc.csv 展示一致：节点汇总里 used/alloc 除以该系数。
 _FLEX_NODE_AGG_DISPLAY_SCALE = 1000.0
@@ -65,6 +70,34 @@ def _parse_res_quantity(q: Any) -> float:
         return float(s)
     except ValueError:
         return 0.0
+
+
+def _flex_core_raw_by_container_map(pod: Mapping[str, Any]) -> Dict[str, float]:
+    meta = pod.get("metadata") or {}
+    ann = meta.get("annotations") or {}
+    raw_val = ann.get(FLEXNPU_CORE_RAW_BY_CONTAINER_ANN)
+    if raw_val is None:
+        return {}
+    if isinstance(raw_val, dict):
+        out: Dict[str, float] = {}
+        for k, v in raw_val.items():
+            try:
+                out[str(k)] = float(v)
+            except (TypeError, ValueError):
+                continue
+        return out
+    return _parse_json_map(str(raw_val))
+
+
+def _req_c_utilization_quantity(
+    pod: Mapping[str, Any], container_name: str, spec_core_qty: Any
+) -> float:
+    """利用率侧 flexnpu_core：优先 Pod 注解中的取整前值，否则与 spec request 一致。"""
+    m = _flex_core_raw_by_container_map(pod)
+    ck = str(container_name) if container_name else "__default__"
+    if ck in m:
+        return m[ck]
+    return _parse_res_quantity(spec_core_qty)
 
 
 def _node_annotations(node_info: Mapping[str, Any]) -> Dict[str, str]:
@@ -128,17 +161,41 @@ def _new_pod_assign_entry() -> Dict[str, Any]:
     return {"union": set(), "by_container": []}
 
 
+def _ceil_to_granularity_step(value: float, step: float) -> float:
+    """与 ``input_config_loader._ceil_to_step`` 一致：将 flex 请求按粒度向上取整。"""
+    if step <= 0:
+        return value
+    return math.ceil(value / step) * step
+
+
 def estimate_card_usage(
-    jobs: Mapping[str, Any], node_name_to_card_ids: Dict[str, List[str]]
+    jobs: Mapping[str, Any],
+    node_name_to_card_ids: Dict[str, List[str]],
+    granularity_percent: float = 0.0,
 ) -> Tuple[
+    Dict[Tuple[str, str], float],
+    Dict[Tuple[str, str], float],
     Dict[Tuple[str, str], float],
     Dict[Tuple[str, str], float],
     Dict[Tuple[str, str], Dict[str, Any]],
     Dict[Tuple[str, str], Dict[str, Dict[str, float]]],
 ]:
-    """对 Running/Binding 的 Pod，按容器 request 与 flexnpu-num 将用量摊到各卡（节点内轮询）。"""
-    used_core: Dict[Tuple[str, str], float] = defaultdict(float)
-    used_mem: Dict[Tuple[str, str], float] = defaultdict(float)
+    """对 Running/Binding 的 Pod，按容器 request 与 flexnpu-num 将用量摊到各卡（节点内轮询）。
+
+    返回两套逐卡累计量（单位与 Pod spec 中 flex 请求一致）：
+
+    - **raw（利用率）**：优先使用 Pod 注解 ``FLEXNPU_CORE_RAW_BY_CONTAINER_ANN`` 中的取整前 request；
+      无注解时与 spec 中 request 一致（与加载器未写注解或旧仿真器兼容）。
+    - **granular（分配）**：对 **flexnpu_core** 按 spec 中 request（已为加载器取整后值）再经 ``granularity_percent`` 做与 ``input_config_loader`` 一致的上取整后分卡；
+      **flexnpu_memory** 不参与粒度。core 在粒度 >0 时分配量可高于利用率侧真实需求。
+
+    ``pod_chip_share`` 为分配侧（core 取整、mem 与 raw 一致）各 Pod 在各卡上的量，供 CSV「占卡」等展示。
+    """
+    g = float(granularity_percent) if granularity_percent else 0.0
+    used_core_raw: Dict[Tuple[str, str], float] = defaultdict(float)
+    used_mem_raw: Dict[Tuple[str, str], float] = defaultdict(float)
+    used_core_gran: Dict[Tuple[str, str], float] = defaultdict(float)
+    used_mem_gran: Dict[Tuple[str, str], float] = defaultdict(float)
     rr: Dict[str, int] = defaultdict(int)
     pod_assign: DefaultDict[Tuple[str, str], Dict[str, Any]] = defaultdict(_new_pod_assign_entry)
     pod_chip_share: DefaultDict[Tuple[str, str], Dict[str, Dict[str, float]]] = defaultdict(dict)
@@ -167,15 +224,23 @@ def estimate_card_usage(
                 continue
             cname = c.get("name") or ""
             res = (c.get("resources") or {}).get("requests") or {}
-            req_c = _parse_res_quantity(res.get(CORE_RES))
-            req_m = _parse_res_quantity(res.get(MEM_RES))
+            req_c_spec = _parse_res_quantity(res.get(CORE_RES))
+            req_c_util = _req_c_utilization_quantity(pod, cname, res.get(CORE_RES))
+            req_m_raw = _parse_res_quantity(res.get(MEM_RES))
+            req_c_gran = (
+                _ceil_to_granularity_step(req_c_spec, g) if g > 0 else req_c_spec
+            )
+            # 分配粒度仅针对 flexnpu_core，memory 不做上取整
+            req_m_gran = req_m_raw
             n_cards = num_map.get(cname, 1)
             if n_cards < 1:
                 n_cards = 1
-            if req_c <= 0 and req_m <= 0:
+            if req_c_util <= 0 and req_m_raw <= 0:
                 continue
-            per_c = req_c / n_cards
-            per_m = req_m / n_cards
+            per_c_raw = req_c_util / n_cards
+            per_m_raw = req_m_raw / n_cards
+            per_c_gran = req_c_gran / n_cards
+            per_m_gran = req_m_gran / n_cards
 
             assigned: List[str] = []
             start = rr[node] % len(card_ids)
@@ -183,8 +248,10 @@ def estimate_card_usage(
                 idx = (start + i) % len(card_ids)
                 cid = str(card_ids[idx])
                 assigned.append(cid)
-                used_core[(node, cid)] += per_c
-                used_mem[(node, cid)] += per_m
+                used_core_raw[(node, cid)] += per_c_raw
+                used_mem_raw[(node, cid)] += per_m_raw
+                used_core_gran[(node, cid)] += per_c_gran
+                used_mem_gran[(node, cid)] += per_m_gran
             rr[node] = start + n_cards
 
             pref = _pod_ref(pod)
@@ -197,10 +264,18 @@ def estimate_card_usage(
                 ck = f"{node}-{cid}"
                 if ck not in pod_chip_share[pk]:
                     pod_chip_share[pk][ck] = {"core": 0.0, "mem": 0.0}
-                pod_chip_share[pk][ck]["core"] += per_c
-                pod_chip_share[pk][ck]["mem"] += per_m
+                pod_chip_share[pk][ck]["core"] += per_c_gran
+                pod_chip_share[pk][ck]["mem"] += per_m_gran
 
-    return used_core, used_mem, dict(pod_assign), {k: dict(v) for k, v in pod_chip_share.items()}
+    chip_out = {k: dict(v) for k, v in pod_chip_share.items()}
+    return (
+        dict(used_core_raw),
+        dict(used_mem_raw),
+        dict(used_core_gran),
+        dict(used_mem_gran),
+        dict(pod_assign),
+        chip_out,
+    )
 
 
 def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
@@ -210,6 +285,15 @@ def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str
     if not isinstance(nodes, dict):
         return None
 
+    try:
+        g = float(
+            resultdata.get("npuGranularityPercent")
+            or resultdata.get("npu_granularity_percent")
+            or 0
+        )
+    except (TypeError, ValueError):
+        g = 0.0
+
     node_card_ids: Dict[str, List[str]] = {}
     for nname, ninfo in nodes.items():
         if not isinstance(ninfo, dict):
@@ -218,17 +302,25 @@ def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str
         ids, _, _ = _card_caps_sorted(ann)
         node_card_ids[str(nname)] = [str(x) for x in ids]
 
-    card_used_core, card_used_mem, pod_assign, pod_chip_share = estimate_card_usage(
-        jobs, node_card_ids
-    )
+    (
+        card_used_core_raw,
+        card_used_mem_raw,
+        card_used_core_gran,
+        card_used_mem_gran,
+        pod_assign,
+        pod_chip_share,
+    ) = estimate_card_usage(jobs, node_card_ids, granularity_percent=g)
     return {
         "nodes": nodes,
         "jobs": jobs,
         "node_card_ids": node_card_ids,
-        "card_used_core": card_used_core,
-        "card_used_mem": card_used_mem,
+        "card_used_core_raw": card_used_core_raw,
+        "card_used_mem_raw": card_used_mem_raw,
+        "card_used_core_gran": card_used_core_gran,
+        "card_used_mem_gran": card_used_mem_gran,
         "pod_assign": pod_assign,
         "pod_chip_share": pod_chip_share,
+        "npuGranularityPercent": g,
     }
 
 
@@ -240,11 +332,15 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
         return "[flexnpu] No Nodes in stepResult.\n"
 
     nodes = snap["nodes"]
-    card_used_core = snap["card_used_core"]
-    card_used_mem = snap["card_used_mem"]
+    card_used_core_raw = snap["card_used_core_raw"]
+    card_used_mem_raw = snap["card_used_mem_raw"]
+    card_used_core_gran = snap["card_used_core_gran"]
+    card_used_mem_gran = snap["card_used_mem_gran"]
     pod_assign = snap["pod_assign"]
 
-    lines.append("=== FlexNPU utilization (node aggregate from scheduler NodeInfo) ===")
+    lines.append(
+        "=== FlexNPU node aggregate (scheduler NodeInfo: allocated / capacity = allocation rate) ==="
+    )
     for nname in sorted(nodes.keys()):
         ninfo = nodes[nname]
         if not isinstance(ninfo, dict):
@@ -258,8 +354,8 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
         pct_c = (100.0 * u_c / a_c) if a_c > 1e-9 else 0.0
         pct_m = (100.0 * u_m / a_m) if a_m > 1e-9 else 0.0
         lines.append(
-            f"  Node {nname}: flexnpu-core  used={u_c:.3f} alloc={a_c:.3f} util={pct_c:.2f}% | "
-            f"flexnpu-memory(128Mi) used={u_m:.3f} alloc={a_m:.3f} util={pct_m:.2f}%"
+            f"  Node {nname}: flexnpu-core  used={u_c:.3f} cap={a_c:.3f} alloc%={pct_c:.2f}% | "
+            f"flexnpu-memory(128Mi) used={u_m:.3f} cap={a_m:.3f} alloc%={pct_m:.2f}%"
         )
 
     lines.append(
@@ -282,7 +378,9 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
             for cname, cids in ent.get("by_container") or []:
                 lines.append(f"    container {cname}: cards {','.join(cids)}")
 
-    lines.append("=== Per NPU card (capacity from node annotations; used estimated from pod requests + flexnpu-num) ===")
+    lines.append(
+        "=== Per NPU card (cap from annotations; util%=raw request / cap, alloc%=granular-rounded / cap) ==="
+    )
     for nname in sorted(nodes.keys()):
         ninfo = nodes[nname]
         if not isinstance(ninfo, dict):
@@ -297,13 +395,18 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
             ck = str(cid)
             ccap = cap_c.get(ck, cap_c.get(cid, 0.0))
             mcap = cap_m.get(ck, cap_m.get(cid, 0.0))
-            uc = card_used_core.get((str(nname), ck), 0.0)
-            um = card_used_mem.get((str(nname), ck), 0.0)
-            pc = (100.0 * uc / ccap) if ccap > 1e-9 else 0.0
-            pm = (100.0 * um / mcap) if mcap > 1e-9 else 0.0
+            uc_r = float(card_used_core_raw.get((str(nname), ck), 0.0))
+            uc_g = float(card_used_core_gran.get((str(nname), ck), 0.0))
+            um_r = float(card_used_mem_raw.get((str(nname), ck), 0.0))
+            um_g = float(card_used_mem_gran.get((str(nname), ck), 0.0))
+            pc_util = (100.0 * uc_r / ccap) if ccap > 1e-9 else 0.0
+            pc_alloc = (100.0 * uc_g / ccap) if ccap > 1e-9 else 0.0
+            pm_util = (100.0 * um_r / mcap) if mcap > 1e-9 else 0.0
+            pm_alloc = (100.0 * um_g / mcap) if mcap > 1e-9 else 0.0
             lines.append(
-                f"    card {ck}: core cap={ccap:.3f} used~={uc:.3f} util~={pc:.2f}% | "
-                f"mem cap={mcap:.3f} used~={um:.3f} util~={pm:.2f}%"
+                f"    card {ck}: core cap={ccap:.3f} raw~={uc_r:.3f} util~={pc_util:.2f}% "
+                f"alloc~={pc_alloc:.2f}% | mem cap={mcap:.3f} raw~={um_r:.3f} util~={pm_util:.2f}% "
+                f"alloc~={pm_alloc:.2f}%"
             )
 
     return "\n".join(lines) + "\n"
