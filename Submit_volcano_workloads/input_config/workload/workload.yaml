@@ -60,6 +60,7 @@ jobs:
       tasks:
         - name: test-pod
           replicas: 5
+          runningTime: 100s
           spec:
             containers:
               - name: test-container-0

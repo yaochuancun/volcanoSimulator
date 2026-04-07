@@ -68,12 +68,15 @@ def _is_unset_k8s_time(s: str) -> bool:
     return not t or t.startswith("0001-01-01") or t == "1970-01-01T00:00:00Z"
 
 
-def _pod_creation_timestamp(
+def _pod_submit_time(
     pod: Mapping[str, Any],
     job: Mapping[str, Any],
     sim_clock: str,
 ) -> str:
-    """Pod 元数据常省略 creationTimestamp；依次尝试 status、Job 时间、仿真时钟等回退。"""
+    """仿真侧 Job 提交进集群时刻：metadata.creationTimestamp，缺省时 Job 时间、最后为 stepResult.clock。
+
+    不使用 ``status.startTime``（开始 Running 另见 ``_pod_status_start_time``）。
+    """
     meta = pod.get("metadata") or {}
     raw = meta.get("creationTimestamp")
     if raw is not None and raw != "":
@@ -93,14 +96,6 @@ def _pod_creation_timestamp(
             if not _is_unset_k8s_time(s):
                 return s
 
-    st = (pod.get("status") or {}).get("startTime")
-    if st:
-        if isinstance(st, dict):
-            st = st.get("Time") or st.get("time")
-        s = str(st).strip() if st else ""
-        if not _is_unset_k8s_time(s):
-            return s
-
     for key in ("CreationTimestamp", "creationTimestamp"):
         jts = job.get(key)
         if jts is None or jts == "":
@@ -112,6 +107,29 @@ def _pod_creation_timestamp(
             return s
 
     return (sim_clock or "").strip()
+
+
+def _pod_status_start_time(pod: Mapping[str, Any]) -> str:
+    """``Pod.status.startTime``（仿真里多为 Binding→Running 时设置）；无或未开始时为空串。"""
+    status = pod.get("status") or {}
+    st = status.get("startTime") or status.get("starttime")
+    if st is None or st == "":
+        for k in status:
+            if str(k).lower() == "starttime":
+                st = status[k]
+                break
+    if st is None or st == "":
+        return ""
+    if isinstance(st, dict):
+        inner = st.get("Time") or st.get("time")
+        if not inner:
+            return ""
+        s = str(inner).strip()
+    else:
+        s = str(st).strip()
+    if not s or s.lower() == "null" or _is_unset_k8s_time(s):
+        return ""
+    return s
 
 
 def _pod_total_flex_requests(pod: Mapping[str, Any]) -> Tuple[float, float]:
@@ -234,7 +252,7 @@ def write_pod_desc_csv(
     path: str,
     sim_clock: str = "",
 ) -> None:
-    """写 Running/Binding/Pending Pod 的描述行（含 flex 请求、创建时间、占卡 JSON）。"""
+    """写 Running/Binding/Pending Pod 的描述行（含 flex 请求、提交时间、status.startTime、占卡 JSON）。"""
     header = [
         "node_name",
         "namespace",
@@ -242,7 +260,8 @@ def write_pod_desc_csv(
         "flexnpu_core_request",
         "flexnpu_memory_request",
         "phase",
-        "created_at",
+        "submit_time",
+        "status.startTime",
         "card_used_quantity",
     ]
     rows: List[List[str]] = [header]
@@ -270,7 +289,8 @@ def write_pod_desc_csv(
             ns, pname = "default", pref
 
         req_c, req_m = _pod_total_flex_requests(pod)
-        created = _pod_creation_timestamp(pod, job, sim_clock)
+        submit_t = _pod_submit_time(pod, job, sim_clock)
+        start_t = _pod_status_start_time(pod)
 
         pk = (node, pref) if node else None
         chip_json = (
@@ -287,7 +307,8 @@ def write_pod_desc_csv(
                 _fmt_scalar_cell(req_c),
                 _fmt_scalar_cell(req_m),
                 phase,
-                created,
+                submit_t,
+                start_t,
                 chip_json,
             ]
         )
