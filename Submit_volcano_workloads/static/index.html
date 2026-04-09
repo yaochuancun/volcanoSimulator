@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -13,7 +13,7 @@
         <div class="hero-icon" aria-hidden="true">◇</div>
         <div>
           <h1>Volcano Simulator</h1>
-          <p class="hero-sub">Scheduling simulation — cluster / workload / multi-plugins</p>
+          <p class="hero-sub">High Performance Scheduling Simulation System</p>
         </div>
       </div>
       <div class="hero-status" id="svcStatus">
@@ -46,10 +46,10 @@
         <input type="file" id="fileCluster" accept=".yaml,.yml,.txt" />
         <label class="file-label">Pod config → workload.yaml</label>
         <input type="file" id="fileWorkload" accept=".yaml,.yml,.txt" />
-        <label class="file-label">Plugins config → plugins.yaml（可多选，每个文件一种调度算法）</label>
+        <label class="file-label">Plugins config → plugins.yaml (multi-select; one scheduler per file)</label>
         <input type="file" id="filePlugins" accept=".yaml,.yml,.txt" multiple />
         <div class="scale-box">
-          <label class="file-label" for="scaleInput">Workload scale（逗号分隔，replicas×系数 向上取整）</label>
+          <label class="file-label" for="scaleInput">Workload scale (comma-separated; replicas × factor, ceiling)</label>
           <input type="text" id="scaleInput" class="scale-input" value="1.0, 2.0" placeholder="e.g. 1.0, 2.25, 5.0" />
         </div>
       </aside>
@@ -57,16 +57,16 @@
       <div class="main-col">
         <section class="card chart-card">
           <div class="card-head">
-            <h2>Cluster resource analysis</h2>
-            <p class="card-desc">折线：各算法节点平均分配率（%）；柱：首次快照 Running Pod 数</p>
+            <h2>Cluster Resource Analysis</h2>
+            <!-- <p class="card-desc">折线：各算法节点平均分配率（%）；柱：首次快照 Running Pod 数</p> -->
           </div>
           <div class="svg-wrap" id="chartMount"></div>
         </section>
 
         <section class="card">
           <div class="card-head">
-            <h2>NPU fragmentation rate (%)</h2>
-            <p class="card-desc">（集群剩余 core − 单节点剩余 core 最大）/ 集群总 core 容量 ×100</p>
+            <h2>NPU Fragmentation Rate</h2>
+            <p class="card-desc">NO DATA YET. RUN A SIMULATION.</p>
           </div>
           <div class="table-wrap">
             <table class="data-table" id="fragTable">

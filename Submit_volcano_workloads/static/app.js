@@ -206,7 +206,7 @@
     try {
       const r = await fetch("/api/status");
       const j = await r.json();
-      // 兼容 { state: {...} } 与历史扁平结构
+      // Support both { state: {...} } and legacy flat JSON
       const st = j.state != null ? j.state : j;
       const pct = Math.min(100, Math.max(0, Number(st.progress_percent) || 0));
       els.progressFill.style.width = pct + "%";
@@ -236,7 +236,7 @@
     const fw = els.fileWorkload.files[0];
     const fps = els.filePlugins.files;
     if (!fc || !fw || !fps.length) {
-      alert("请选择 cluster、workload 与至少一个 plugins 文件。");
+      alert("Please select cluster, workload, and at least one plugins file.");
       return;
     }
     els.btnRun.disabled = true;
@@ -255,7 +255,7 @@
     try {
       const r = await fetch("/api/runs", { method: "POST", body: fd });
       if (r.status === 409) {
-        els.runMsg.textContent = "已有任务在运行，请稍后。";
+        els.runMsg.textContent = "A simulation is already running. Please wait.";
         els.btnRun.disabled = false;
         return;
       }
