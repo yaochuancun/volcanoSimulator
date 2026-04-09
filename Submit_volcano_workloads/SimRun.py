@@ -56,6 +56,8 @@ def step(
 
     ``npu_granularity_percent`` 与 workload YAML 的 ``spec.npuGranularityPercent`` 一致时，
     逐卡估算仅对 **flexnpu_core** 做相同粒度上取整（memory 不取整）。
+
+    返回本次有效的 ``stepResult`` 字典（供 Web/API 计算指标）；若未拿到快照则返回 ``None``。
     """
     client = JsonHttpClient(sim_base_url)
 
@@ -150,6 +152,7 @@ def step(
     print(JCT_table)
 
     time.sleep(0.5)
+    return resultdata if isinstance(resultdata, dict) else None
 
 if __name__ == '__main__':
     # 默认连本地仿真服务；结果目录由 plugins.yaml 的 output.outDir（含 {date}）决定

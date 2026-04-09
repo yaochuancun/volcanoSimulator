@@ -99,13 +99,25 @@ cd Submit_volcano_workloads
 python SimRun.py
 ```
 
-### 4. 修改输入与结果路径
+### 4. Web 单页（上传 cluster / workload / 多份 plugins，算法 × 缩放矩阵）
+
+需先启动 Go 仿真器（默认 `http://127.0.0.1:8006`）。在 `Submit_volcano_workloads` 下安装依赖并启动 API（静态页与 `/api/*` 同源）：
+
+```bash
+cd Submit_volcano_workloads
+pip install -r requirements.txt
+uvicorn sim_web_api:app --host 127.0.0.1 --port 8765
+```
+
+浏览器访问 **http://127.0.0.1:8765/**。单次仅允许一个仿真任务；结果保存在 `Submit_volcano_workloads/var/sim_web_runs/<run_id>/`，可通过页面 **Export Data** 下载各组合目录下 CSV 等的 ZIP。环境变量 **`VOLCANO_SIM_URL`** 可覆盖仿真器地址。
+
+### 5. 修改输入与结果路径
 
 - 在 **`Submit_volcano_workloads/SimRun.py`** 的 `if __name__ == '__main__':` 中修改：  
   `cluster_path`、`workload_path`、`plugins_path`（例如 `cluster_1.yaml`、`workload_1.yaml` 等）。  
 - 结果根目录由 **`Submit_volcano_workloads/input_config/plugins/*.yaml`** 的 `output.outDir` 决定（支持 `{date}`）；产物直接写入该目录，不再建 `tasks/<时间戳>/` 或 `statistics/` 子目录。
 
-### 5. 说明与校验
+### 6. 说明与校验
 
 - 各输入子目录说明见 **`Submit_volcano_workloads/input_config/README.md`**。  
 - 本地仿真结果路径见根目录 **`.gitignore`**（如 `Submit_volcano_workloads/result/`），请勿将大结果目录提交到远端。

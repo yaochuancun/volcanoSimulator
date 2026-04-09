@@ -242,4 +242,5 @@ sequenceDiagram
 - [**requirements.md**](./requirements.md): scope, I/O contracts, terminology.  
 - [**功能清单与待办.md**](./功能清单与待办.md): implemented vs optional checklist.  
 - [**README.md**](../README.md): build/run and directory overview.  
-- [**Submit_volcano_workloads/input_config/README.md**](../Submit_volcano_workloads/input_config/README.md): input file roles.
+- [**Submit_volcano_workloads/input_config/README.md**](../Submit_volcano_workloads/input_config/README.md): input file roles.  
+- [**10-Web界面与后端编排架构讨论.md**](./10-Web界面与后端编排架构讨论.md): Web UI, single-user single-run, Python Worker (scheme B), multi-algorithm batch, workload scale, ZIP export.

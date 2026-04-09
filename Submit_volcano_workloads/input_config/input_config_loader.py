@@ -160,6 +160,34 @@ def load_cluster_for_simulator(path: str) -> str:
     return cluster_input_to_simulator_yaml(doc)
 
 
+def cluster_yaml_text_to_simulator_yaml(yaml_text: str) -> str:
+    """从 YAML 文本解析 cluster 文档并返回仿真器用 nodes YAML 字符串。"""
+    doc = yaml.safe_load(yaml_text)
+    if not isinstance(doc, dict):
+        raise ValueError("cluster config must be a YAML mapping")
+    return cluster_input_to_simulator_yaml(doc)
+
+
+def workload_yaml_text_to_simulator_yaml(yaml_text: str) -> str:
+    """从 YAML 文本解析 workload 文档并返回仿真器用 jobs YAML 字符串。"""
+    doc = yaml.safe_load(yaml_text)
+    if not isinstance(doc, dict):
+        raise ValueError("workload config must be a YAML mapping")
+    return workload_input_to_simulator_yaml(doc)
+
+
+def workload_doc_to_simulator_yaml(doc: Dict[str, Any]) -> str:
+    """内存中的 workload 文档（已缩放等）转为仿真器 jobs YAML 字符串。"""
+    if not isinstance(doc, dict):
+        raise ValueError("workload config must be a mapping")
+    return workload_input_to_simulator_yaml(doc)
+
+
+def workload_npu_granularity_percent_from_doc(doc: Mapping[str, Any]) -> float:
+    """从已解析的 workload 文档读取 npuGranularityPercent。"""
+    return workload_npu_granularity_percent(doc)
+
+
 def workload_npu_granularity_percent(doc: Mapping[str, Any]) -> float:
     """读取 workload 文档顶层 ``spec.npuGranularityPercent``（与 ``workload_input_to_simulator_yaml`` 一致）。"""
     try:
@@ -214,4 +242,19 @@ def load_plugins_for_simulator(path: str) -> Tuple[str, str]:
     out_dir = resolve_out_dir_pattern(out_dir)
     if not os.path.isabs(out_dir):
         out_dir = os.path.normpath(os.path.join(os.getcwd(), out_dir))
+    return conf_str, out_dir
+
+
+def plugins_document_scheduler_and_outdir(
+    doc: Dict[str, Any],
+    result_out_dir: str,
+) -> Tuple[str, str]:
+    """从已解析的 plugins 文档取 scheduler 块，并将结果目录设为 ``result_out_dir``（绝对路径）。"""
+    if not isinstance(doc, dict):
+        raise ValueError("plugins config must be a YAML mapping")
+    scheduler = doc.get("scheduler")
+    if not scheduler:
+        raise ValueError("plugins config: missing 'scheduler'")
+    conf_str = yaml.safe_dump(scheduler, sort_keys=False, allow_unicode=True)
+    out_dir = os.path.normpath(os.path.abspath(result_out_dir))
     return conf_str, out_dir

@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: PluginList
+scheduler:
+  actions: "enqueue, allocate, backfill, preempt"
+  tiers:
+    - plugins:
+      - name: priority
+      - name: gang
+        enablePreemptable: false
+        enableJobStarving: false
+      - name: conformance
+    - plugins:
+      - name: drf
+        enablePreemptable: false
+      - name: predicates
+      - name: nodeorder
+output:
+  outDir: ./result/{date}
+  formats:
+    - csv
