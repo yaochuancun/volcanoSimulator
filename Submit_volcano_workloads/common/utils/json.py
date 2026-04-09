@@ -1,68 +1,68 @@
-"""从 JSON 文件或 MySQL（Alibaba 轨迹库）读取作业/实例数据，用于构造仿真 workload 的辅助脚本。"""
+"""Helper script: read job/instance data from JSON files or MySQL (Alibaba trace DB) to build simulation workloads."""
 
 import json
 import pymysql
 
 
 def read_json_file(filename):
-    """读取 JSON 文件并返回解析后的对象。"""
+    """Read a JSON file and return the parsed object."""
     with open(filename, "r") as fp:
         data = json.load(fp)
         return data
 
 def read_sql_file(tracetimeid:int,workloadtypeid:int,jobconsist_tasknumber:int,job_tasknum:int,job_num:int):
-    """按轨迹表与时间片筛选 Job，再按 CPU/内存/workload 类型过滤实例，组装为 job.tasks 列表结构。"""
+    """Filter jobs by trace table and JCT threshold, then filter instances by CPU/memory/workload type; build job.tasks lists."""
 
-    # 连接 MySQL（主机与库名需与部署环境一致）
+    # MySQL connection (host/db must match deployment)
     connection = pymysql.connect(host='10.4.21.109', user='root', password='abcd2439774702', db='alibaba')
     cursor = connection.cursor()
     print('Connect mysql succeed!')
 
-    # 先筛出满足 JCT 条件的 job_name
+    # Job names meeting JCT condition first
     sql1 = 'select job_name from getjob_5_modified_%d where jct > %d' % (tracetimeid, job_tasknum)
     cursor.execute(sql1)
     result1 = cursor.fetchall()
     print("SQL job number: ",len(result1))
     print("-----------------------------")
 
-    # 再按 job_name 拉取实例行，按 workload 类型过滤
+    # Fetch instance rows per job_name; filter by workload type
     alljobdict = []
     for i, row1 in enumerate(result1):
 
-        # 按 job 名称关联实例表
+        # Join instance table by job name
         sql2 = "select job_name,start_time,end_time,cpu_avg,cpu_max,mem_avg,mem_max from batch_instance_2_%d " \
                "where job_name='%s'" % (tracetimeid, row1[0])
         cursor.execute(sql2)
         result2 = cursor.fetchall()
 
-        # 聚合该 job 下通过筛选的实例
+        # Collect instances for this job that pass filters
         singlejobdict = {}
         singlejobdict['job.tasks'] = []
         for j, row2 in enumerate(result2):
 
-            # 实例字段：起止时间、CPU/内存请求等（row2: job_name, start, end, cpu_avg, cpu_max, mem_avg, mem_max）
+            # Instance fields: start/end, CPU/mem (row2: job_name, start, end, cpu_avg, cpu_max, mem_avg, mem_max)
             instance_starttime = int(row2[1])
             instance_endtime = int(row2[2])
             request_cpu = int(row2[3])
             request_mem = float(row2[5])
             instance_runningtime = instance_endtime - instance_starttime
 
-            # workloadtypeid 1：低 CPU、低内存
+            # workloadtypeid 1: low CPU, low memory
             if workloadtypeid == 1:
                 if (request_cpu > 10 and request_cpu <= 50) and (request_mem <= 0.05) and (instance_runningtime >= 20):
                     singlejobdict['job.tasks'].append(row2)
 
-            # workloadtypeid 2：低 CPU、高内存
+            # workloadtypeid 2: low CPU, high memory
             if workloadtypeid == 2:
                 if (request_cpu > 10 and request_cpu <= 50) and (request_mem >= 0.7 and request_mem <= 0.8) and (instance_runningtime >= 20):
                     singlejobdict['job.tasks'].append(row2)
 
-            # workloadtypeid 3：高 CPU、低内存
+            # workloadtypeid 3: high CPU, low memory
             if workloadtypeid == 3:
                 if (request_cpu > 100 and request_cpu < 200) and (request_mem <= 0.05) and (instance_runningtime >= 20):
                     singlejobdict['job.tasks'].append(row2)
 
-            # workloadtypeid 4：高 CPU、高内存
+            # workloadtypeid 4: high CPU, high memory
             if workloadtypeid == 4:
                 if (request_cpu > 100 and request_cpu < 200) and (request_mem >= 0.7 and request_mem <= 0.8) and (instance_runningtime >= 20):
                     singlejobdict['job.tasks'].append(row2)

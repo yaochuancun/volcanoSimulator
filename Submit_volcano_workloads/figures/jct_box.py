@@ -1,4 +1,4 @@
-"""JCT 箱线图：matplotlib / seaborn 多种画法。"""
+"""JCT box plots: matplotlib and seaborn variants."""
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -10,7 +10,7 @@ def draw_jct_box(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
-    """按算法分组绘制 Job Completed Time 箱线图（matplotlib boxplot）。"""
+    """Box plot of Job Completed Time per algorithm (matplotlib boxplot)."""
     data = []
     for an in algorithm_names:
         df = data_frame[data_frame['name'] == an]
@@ -38,7 +38,7 @@ def draw_jct_box_modify(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
-    """使用 seaborn 风格的箱线图（示例）。"""
+    """Seaborn-style box plot (example)."""
     data = []
     for an in algorithm_names:
         df = data_frame[data_frame['name'] == an]
@@ -63,7 +63,7 @@ def draw_jct_box_1(data_frame: pd.DataFrame,
                  title: str = None,
                  x_label: str = None,
                  y_label: str = None):
-    """将各算法 JCT 列拼成宽表后用 DataFrame.boxplot 绘制，并自定义箱体颜色。"""
+    """Wide table of JCT per algorithm column, then DataFrame.boxplot with custom box colors."""
 
     frame1 = pd.DataFrame()
     for an in algorithm_names:
@@ -75,7 +75,7 @@ def draw_jct_box_1(data_frame: pd.DataFrame,
                        showfliers=False, meanprops={'marker': 'o', 'markerfacecolor': 'magenta', 'markersize': 2},
                        medianprops={'color': 'red', 'linewidth': 1})
 
-    # 有多少box就对应设置多少颜色
+    # One color entry per box
     color1 = ['b', 'black', 'black', 'black', 'black', 'black',
               'black', 'black', 'black', 'black', 'black', 'black']
     color2 = ['b', 'b', 'black', 'black', 'black', 'black', 'black',
@@ -84,7 +84,7 @@ def draw_jct_box_1(data_frame: pd.DataFrame,
               'black', 'black', 'black', 'black', 'black',]
 
     for box, c in zip(f['boxes'], color1):
-        # 箱体边框颜色
+        # Box edge color
         box.set(color=c, linewidth=1)
 
     for whisker, d in zip(f['whiskers'], color2):

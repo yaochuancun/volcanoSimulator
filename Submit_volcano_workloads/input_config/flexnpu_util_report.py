@@ -1,7 +1,9 @@
-"""根据仿真器 ``stepResult`` JSON，汇总并打印 FlexNPU 算力/显存利用率（按节点、按卡），
-以及 Pod 到 NPU 卡的估算分配（结合 flexnpu-num 与容器 request，在节点内轮询分卡）。
+"""From simulator ``stepResult`` JSON, aggregate and print FlexNPU compute / memory utilization
+(per node, per card), and estimated Pod-to-NPU-card placement (using flexnpu-num and container
+requests, round-robin across cards on the node).
 
-供控制台输出与写入 ``flexnpu_utilization.txt`` 使用；``compute_flexnpu_snapshot`` 亦被 CSV 报表复用。
+Used for console output and writing ``flexnpu_utilization.txt``; ``compute_flexnpu_snapshot``
+is also reused by CSV reporting.
 """
 
 from __future__ import annotations
@@ -11,18 +13,18 @@ import math
 from collections import defaultdict
 from typing import Any, DefaultDict, Dict, List, Mapping, Optional, Set, Tuple
 
-# FlexNPU 资源在 Pod spec 与 Node 注解中使用的键名
+# Keys for FlexNPU resources in Pod spec and Node annotations
 CORE_RES = "volcano.sh/flexnpu-core.percentage"
 MEM_RES = "volcano.sh/flexnpu-memory.128mi"
 FLEXNPU_NUM_ANN = "volcano.sh/flexnpu-num"
 CORE_LIST_ANN = "volcano.sh/flexnpu-core.percentage-list"
 MEM_LIST_ANN = "volcano.sh/flexnpu-memory.128mi-list"
-# 与 input_config_loader 写入一致：取整前各容器 flexnpu_core（JSON），用于利用率与分配率区分
+# Matches input_config_loader: pre-rounding flexnpu_core per container (JSON); separates utilization vs allocation
 FLEXNPU_CORE_RAW_BY_CONTAINER_ANN = (
     "volcano.sh/flexnpu-core.percentage-raw-by-container"
 )
 
-# 与 Volcano ScalarResources（MilliValue）及 Node_desc.csv 展示一致：节点汇总里 used/alloc 除以该系数。
+# Aligns with Volcano ScalarResources (MilliValue) and Node_desc.csv: node aggregates divide used/alloc by this factor.
 _FLEX_NODE_AGG_DISPLAY_SCALE = 1000.0
 
 
@@ -92,7 +94,7 @@ def _flex_core_raw_by_container_map(pod: Mapping[str, Any]) -> Dict[str, float]:
 def _req_c_utilization_quantity(
     pod: Mapping[str, Any], container_name: str, spec_core_qty: Any
 ) -> float:
-    """利用率侧 flexnpu_core：优先 Pod 注解中的取整前值，否则与 spec request 一致。"""
+    """Utilization-side flexnpu_core: prefer pre-rounding values from Pod annotations, else spec request."""
     m = _flex_core_raw_by_container_map(pod)
     ck = str(container_name) if container_name else "__default__"
     if ck in m:
@@ -162,7 +164,7 @@ def _new_pod_assign_entry() -> Dict[str, Any]:
 
 
 def _ceil_to_granularity_step(value: float, step: float) -> float:
-    """与 ``input_config_loader._ceil_to_step`` 一致：将 flex 请求按粒度向上取整。"""
+    """Same as ``input_config_loader._ceil_to_step``: round flex request up to granularity step."""
     if step <= 0:
         return value
     return math.ceil(value / step) * step
@@ -180,16 +182,20 @@ def estimate_card_usage(
     Dict[Tuple[str, str], Dict[str, Any]],
     Dict[Tuple[str, str], Dict[str, Dict[str, float]]],
 ]:
-    """对 Running/Binding 的 Pod，按容器 request 与 flexnpu-num 将用量摊到各卡（节点内轮询）。
+    """For Running/Binding Pods, spread usage across cards from container requests and flexnpu-num
+    (round-robin within the node).
 
-    返回两套逐卡累计量（单位与 Pod spec 中 flex 请求一致）：
+    Returns two per-card cumulative tracks (same units as flex requests in Pod spec):
 
-    - **raw（利用率）**：优先使用 Pod 注解 ``FLEXNPU_CORE_RAW_BY_CONTAINER_ANN`` 中的取整前 request；
-      无注解时与 spec 中 request 一致（与加载器未写注解或旧仿真器兼容）。
-    - **granular（分配）**：对 **flexnpu_core** 按 spec 中 request（已为加载器取整后值）再经 ``granularity_percent`` 做与 ``input_config_loader`` 一致的上取整后分卡；
-      **flexnpu_memory** 不参与粒度。core 在粒度 >0 时分配量可高于利用率侧真实需求。
+    - **raw (utilization)**: prefer pre-rounding requests in Pod annotation ``FLEXNPU_CORE_RAW_BY_CONTAINER_ANN``;
+      if absent, use spec request (compatible with loader not writing annotations or older simulators).
+    - **granular (allocation)**: for **flexnpu_core**, take spec request (already rounded by loader), then
+      apply the same ceiling as ``input_config_loader`` using ``granularity_percent``, then split across cards;
+      **flexnpu_memory** is not subject to granularity. When granularity > 0, allocated core can exceed
+      utilization-side demand.
 
-    ``pod_chip_share`` 为分配侧（core 取整、mem 与 raw 一致）各 Pod 在各卡上的量，供 CSV「占卡」等展示。
+    ``pod_chip_share`` is per-Pod per-card amounts on the allocation path (rounded core; mem same as raw),
+    for CSV "card share" style columns.
     """
     g = float(granularity_percent) if granularity_percent else 0.0
     used_core_raw: Dict[Tuple[str, str], float] = defaultdict(float)
@@ -230,7 +236,7 @@ def estimate_card_usage(
             req_c_gran = (
                 _ceil_to_granularity_step(req_c_spec, g) if g > 0 else req_c_spec
             )
-            # 分配粒度仅针对 flexnpu_core，memory 不做上取整
+            # Granularity applies only to flexnpu_core; memory is not ceiled
             req_m_gran = req_m_raw
             n_cards = num_map.get(cname, 1)
             if n_cards < 1:
@@ -279,7 +285,7 @@ def estimate_card_usage(
 
 
 def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """从 stepResult 构建节点卡列表、每卡用量估计、Pod 绑卡等信息；无有效 Nodes 时返回 None。"""
+    """Build node card lists, per-card usage estimates, and Pod-to-card binding info from stepResult; None if no valid Nodes."""
     nodes = resultdata.get("Nodes") or resultdata.get("nodes") or {}
     jobs = resultdata.get("Jobs") or resultdata.get("jobs") or {}
     if not isinstance(nodes, dict):
@@ -325,7 +331,7 @@ def compute_flexnpu_snapshot(resultdata: Mapping[str, Any]) -> Optional[Dict[str
 
 
 def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
-    """生成多段文本报告（节点汇总、Pod→卡、逐卡利用率），供写文件或打印。"""
+    """Build a multi-section text report (node summary, Pod→cards, per-card utilization) for printing or files."""
     lines: List[str] = []
     snap = compute_flexnpu_snapshot(resultdata)
     if snap is None:
@@ -413,7 +419,7 @@ def format_flexnpu_report(resultdata: Mapping[str, Any]) -> str:
 
 
 def print_flexnpu_utilization(resultdata: Mapping[str, Any]) -> str:
-    """格式化报告并打印到标准输出，同时返回字符串供调用方写入文件。"""
+    """Format the report, print to stdout, and return the same string for callers to write to a file."""
     text = format_flexnpu_report(resultdata)
     print(text, end="")
     return text

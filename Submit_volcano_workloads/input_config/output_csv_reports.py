@@ -1,6 +1,6 @@
-"""根据 stepResult 快照生成四类统计 CSV，写入同一次仿真的输出目录（平铺，无子目录）。
+"""Build four statistics CSVs from a stepResult snapshot into a single simulation output directory (flat, no subdirs).
 
-文件：Node_desc.csv、POD_desc.csv、npu_chip.csv、summary.csv。
+Files: Node_desc.csv, POD_desc.csv, npu_chip.csv, summary.csv.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _fmt_frac(used: float, total: float) -> str:
 
 
 def _fmt_node_desc_rate(used: float, total: float) -> str:
-    """Node_desc 比率列：0–100 的数值，不带 %；整数显示为整数（如 100）。"""
+    """Node_desc rate column: numeric 0–100 without %; whole numbers as integers (e.g. 100)."""
     if total < 1e-9:
         return "0"
     pct = 100.0 * used / total
@@ -49,7 +49,7 @@ def _fmt_scalar_cell(v: float) -> str:
 
 
 def _task_node_name(task: Mapping[str, Any], pod: Mapping[str, Any]) -> str:
-    """从 Task 或内嵌 TransactionContext、Pod spec 解析节点名。"""
+    """Resolve node name from Task, nested TransactionContext, or Pod spec."""
     n = task.get("NodeName") or task.get("nodeName")
     if n:
         return str(n)
@@ -73,9 +73,9 @@ def _pod_submit_time(
     job: Mapping[str, Any],
     sim_clock: str,
 ) -> str:
-    """仿真侧 Job 提交进集群时刻：metadata.creationTimestamp，缺省时 Job 时间、最后为 stepResult.clock。
+    """Sim-side job submit time: metadata.creationTimestamp; else Job timestamp; else stepResult.clock.
 
-    不使用 ``status.startTime``（开始 Running 另见 ``_pod_status_start_time``）。
+    Does not use ``status.startTime`` (when Running starts, see ``_pod_status_start_time``).
     """
     meta = pod.get("metadata") or {}
     raw = meta.get("creationTimestamp")
@@ -110,7 +110,7 @@ def _pod_submit_time(
 
 
 def _pod_status_start_time(pod: Mapping[str, Any]) -> str:
-    """``Pod.status.startTime``（仿真里多为 Binding→Running 时设置）；无或未开始时为空串。"""
+    """``Pod.status.startTime`` (often set on Binding→Running in sim); empty if unset or not started."""
     status = pod.get("status") or {}
     st = status.get("startTime") or status.get("starttime")
     if st is None or st == "":
@@ -157,7 +157,7 @@ def _chip_json_core(chip_share: Mapping[str, Mapping[str, float]]) -> str:
     return json.dumps(out, ensure_ascii=False)
 
 
-# Node_desc 中 flex 资源展示量级：与调度器内部 ScalarResources 一致的量除以该系数写入 CSV（分配率不变）。
+# Node_desc flex display scale: scheduler ScalarResources quantities are divided by this for CSV cells (rates unchanged).
 _NODE_DESC_FLEX_SCALE = 1000.0
 
 
@@ -167,7 +167,7 @@ def _node_card_used_and_caps(
     card_used_core: Mapping[Tuple[str, str], float],
     card_used_mem: Mapping[Tuple[str, str], float],
 ) -> Tuple[float, float, float, float]:
-    """按节点汇总：逐卡估算用量之和与注解容量之和 (core_used, core_cap, mem_used, mem_cap)。"""
+    """Per-node totals: sum of per-card estimates vs annotation caps (core_used, core_cap, mem_used, mem_cap)."""
     ann = _node_annotations(ninfo)
     ids, cap_c, cap_m = _card_caps_sorted(ann)
     nn = str(nname)
@@ -188,11 +188,11 @@ def write_node_desc_csv(
     card_used_mem_raw: Mapping[Tuple[str, str], float],
     path: str,
 ) -> None:
-    """写节点级 FlexNPU。
+    """Write node-level FlexNPU rows.
 
-    - **分配**（allocated / allocation_rate）：调度器 ``NodeInfo`` 的 Used/Allocatable（含业务粒度在调度侧的记账）。
-    - **利用**（utilized / utilization_rate）：按 Pod spec **原始** flex request 分卡汇总（未再做粒度上取整）；
-      量级与 Pod/节点注解中的 flex 数值一致，**不再**除以 ``_NODE_DESC_FLEX_SCALE``（该系数仅用于调度器 ScalarResources 与 allocated 列）。
+    - **Allocation** (allocated / allocation_rate): scheduler ``NodeInfo`` Used/Allocatable (including granularity bookkeeping).
+    - **Utilization** (utilized / utilization_rate): per-card sums from **raw** Pod spec flex requests (no extra rounding);
+      same magnitude as flex values in Pod/node annotations; **do not** divide by ``_NODE_DESC_FLEX_SCALE`` (that factor applies only to scheduler ScalarResources and allocated columns).
     """
     rows: List[List[str]] = [
         [
@@ -221,7 +221,7 @@ def write_node_desc_csv(
         eu_c, et_c, eu_m, et_m = _node_card_used_and_caps(
             str(nname), ninfo, card_used_core_raw, card_used_mem_raw
         )
-        # 与 allocated 列（/1000 后的调度器标量）同量级：注解容量之和通常已与 a_c 一致；勿再对逐卡估算除 1000
+        # Same magnitude as allocated (/1000 scheduler scalars); annotation caps usually match a_c; do not divide per-card estimate by 1000 again
         eu_c_d, et_c_d = eu_c, et_c
         eu_m_d, et_m_d = eu_m, et_m
         if et_c < 1e-9:
@@ -252,7 +252,7 @@ def write_pod_desc_csv(
     path: str,
     sim_clock: str = "",
 ) -> None:
-    """写 Running/Binding/Pending Pod 的描述行（含 flex 请求、提交时间、status.startTime、占卡 JSON）。"""
+    """Write Running/Binding/Pending Pod rows (flex requests, submit time, status.startTime, per-card JSON)."""
     header = [
         "node_name",
         "namespace",
@@ -329,10 +329,10 @@ def write_npu_chip_csv(
     card_used_mem_gran: Mapping[Tuple[str, str], float],
     path: str,
 ) -> None:
-    """按节点、按卡写入 flexnpu core/memory 的利用率与分配率（百分比，0–100）。
+    """Per node and card: flexnpu core/memory utilization and allocation rates (percent, 0–100).
 
-    core：分配率为粒度上取整后的分卡量/容量，利用率为原始分卡量/容量。
-    memory：不参与 ``npuGranularityPercent``，分配与利用相同（两列数值一致）。
+    core: allocation = granular rounded per-card amount / cap; utilization = raw per-card amount / cap.
+    memory: not subject to ``npuGranularityPercent``; allocation and utilization match (same two values).
     """
     rows: List[List[str]] = [
         [
@@ -384,7 +384,7 @@ def write_summary_csv(
     jobs: Mapping[str, Any],
     path: str,
 ) -> None:
-    """汇总节点数与 Running/Binding、Pending Pod 数量。"""
+    """Summarize node count and Running/Binding vs Pending pod counts."""
     node_count = len([k for k, v in nodes.items() if isinstance(v, dict)])
     run_c = 0
     pend_c = 0
@@ -405,7 +405,7 @@ def write_summary_csv(
 
 
 def write_output_config_csvs(resultdata: Mapping[str, Any], output_dir: str) -> None:
-    """在 ``output_dir`` 下写入上述四个 CSV（目录不存在则创建）；无有效快照时直接返回。"""
+    """Write the four CSVs under ``output_dir`` (mkdir if needed); no-op if snapshot is invalid."""
     os.makedirs(output_dir, exist_ok=True)
     snap = compute_flexnpu_snapshot(resultdata)
     if snap is None:

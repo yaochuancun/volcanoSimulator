@@ -1,7 +1,5 @@
-"""Volcano 仿真器客户端入口：通过 HTTP 调用 /reset、/step、/stepResult，并将结果写入本地目录。
-
-配置来自 input_config 下的 cluster / workload / plugins YAML；产物（CSV、FlexNPU 报表等）
-写入 plugins 中 output.outDir 解析后的路径。
+"""Volcano Simulator Client Entrypoint: Invokes the /reset, /step, and /stepResult endpoints via HTTP, and writes the results to the local directory.
+Configuration is loaded from the cluster, workload, and plugins YAML files under the input_config directory; the output artifacts (including CSV files, FlexNPU reports, etc.) are written to the resolved path specified by output.outDir in the plugins configuration.
 """
 
 from common.utils.json_http_client import JsonHttpClient
@@ -22,13 +20,13 @@ import prettytable
 
 
 def _get_key_or_empty(data, key):
-    """从响应字典取 key，转为 munch 对象；缺失或 None 时返回空列表。"""
+    """Retrieve the key from the response dictionary, convert it to a Munch object; return an empty list if the key is missing or its value is None."""
     pods = munch.munchify(data[key])
     return pods if pods is not None else []
 
 
 def reset(sim_base_url, nodes_yaml, workload_yaml):
-    """调用仿真器 /reset，下发节点与作业负载 YAML，初始化一次仿真环境。"""
+    """Invoke the simulator's /reset endpoint, deliver the node and job workload YAML files, and initialize the simulation environment once."""
     client = JsonHttpClient(sim_base_url)
 
     dicData = client.get_json('/reset', json={
@@ -51,13 +49,9 @@ def step(
     pods_result_url,
     npu_granularity_percent: float = 0.0,
 ):
-    """调用 /step 推进调度，轮询 /stepResult 直至有有效快照；将 Pod 列表、阶段统计、
-    FlexNPU 利用率及统计 CSV 写入 ``pods_result_url`` 目录。
-
-    ``npu_granularity_percent`` 与 workload YAML 的 ``spec.npuGranularityPercent`` 一致时，
-    逐卡估算仅对 **flexnpu_core** 做相同粒度上取整（memory 不取整）。
-
-    返回本次有效的 ``stepResult`` 字典（供 Web/API 计算指标）；若未拿到快照则返回 ``None``。
+    """Invoke the /step endpoint to advance scheduling, and poll the /stepResult endpoint until a valid snapshot is obtained; write the Pod list, phase statistics, FlexNPU utilization data, and statistical CSV files to the pods_result_url directory.
+When the value of npu_granularity_percent is consistent with spec.npuGranularityPercent in the workload YAML file, perform card-by-card estimation with flexnpu_core rounded up to the same granularity (memory will not be rounded).
+Return the valid stepResult dictionary of this run (for Web/API to calculate metrics); return None if no snapshot is obtained.
     """
     client = JsonHttpClient(sim_base_url)
 
@@ -74,7 +68,7 @@ def step(
     other_phase_count = 0
     succeed_table = prettytable.PrettyTable(task_headers)
     while True:
-        # 等待后拉取集群快照；若仍为 '0' 表示本周期尚未结束，继续轮询
+        # Wait and then pull the cluster snapshot; if the value is still 0, it indicates that the current cycle has not ended, and polling should continue.
         time.sleep(wait)
         resultdata = client.get_json('/stepResult', json={
             'none': "",
@@ -155,7 +149,7 @@ def step(
     return resultdata if isinstance(resultdata, dict) else None
 
 if __name__ == '__main__':
-    # 默认连本地仿真服务；结果目录由 plugins.yaml 的 output.outDir（含 {date}）决定
+    # It connects to the local simulation service by default; the result directory is determined by output.outDir (including {date}) in plugins.yaml
 
     sim_base_url = 'http://localhost:8006'
     _base_dir = os.path.dirname(os.path.abspath(__file__))

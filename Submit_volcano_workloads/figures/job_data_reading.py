@@ -1,4 +1,4 @@
-"""从各算法结果子目录读取 coutJCT.csv / coutJCT.md，合并为 summary 与逐 Job 的 DataFrame。"""
+"""Read coutJCT.csv / coutJCT.md from each algorithm result subdir; merge into summary and per-job DataFrames."""
 
 import datetime
 import logging
@@ -10,7 +10,7 @@ import pandas as pd
 
 
 def read_data_from_directory(directory: str) -> Tuple[float, float, float, float, pd.DataFrame]:
-    """读取单个结果目录：返回 JCT 均值/最小/最大、从 markdown 解析的 makespan，以及原始 CSV DataFrame。"""
+    """Read one result dir: JCT mean/min/max, makespan parsed from markdown, and raw CSV as DataFrame."""
     csv_filename = os.path.join(directory, 'coutJCT.csv')
     data = pd.read_csv(csv_filename)
     job_complete_times = data['Job Completed Time(s)']
@@ -23,7 +23,7 @@ def read_data_from_directory(directory: str) -> Tuple[float, float, float, float
 
 
 def read_data_from_directories(directories: List[str]):
-    """聚合多个结果目录，返回 summary 表（每算法一行）与纵向合并后的 jobs 表。"""
+    """Aggregate multiple result dirs: summary (one row per algorithm) and vertically concatenated jobs table."""
     mean_jct_list, min_jct_list, max_jct_list, makespans, names = [], [], [], [], []
     df = None
     for directory in directories:
@@ -50,7 +50,7 @@ def read_data_from_directories(directories: List[str]):
 
 
 def save_csv(data_frame: pd.DataFrame):
-    """将 DataFrame 写入带时间戳的 xlsx（目录 results/csv）。"""
+    """Write DataFrame to a timestamped xlsx under results/csv."""
     now = datetime.datetime.now().strftime('%Y-%m-%d %H-%M-%S')
     save_dir = 'results/csv'
     os.makedirs(save_dir, exist_ok=True)

@@ -1,10 +1,10 @@
-"""从仿真器 stepResult 计算前端图表用指标。
+"""Compute frontend chart metrics from simulator stepResult.
 
-- 分配率（折线图）：各节点 flexnpu_core_allocation_rate（与 Node_desc 一致）的 **算术平均**（%）。
-- 可分配 Pod 数：**第一次**调度快照中 phase 为 Running 的 Pod 个数（不含 Binding/Pending）。
-- 碎片率：(集群剩余 flexnpu_core 总量 − 单节点剩余 flexnpu_core 的最大值) / 集群 flexnpu_core 总容量；
-  其中「剩余」= 节点 Allocatable − Used（与 Node_desc 同量级，ScalarResources / 1000）。
-  含义：若全部剩余集中在一个节点上则接近 0；剩余分散在多个节点上则升高。
+- Allocation rate (line chart): **arithmetic mean** of per-node flexnpu_core_allocation_rate (same as Node_desc), in %.
+- Schedulable pod count: number of Pods with phase Running in the **first** scheduling snapshot (excludes Binding/Pending).
+- Fragmentation: (cluster remaining flexnpu_core sum − max per-node remaining flexnpu_core) / cluster flexnpu_core capacity;
+  "remaining" = node Allocatable − Used (same scale as Node_desc, ScalarResources / 1000).
+  Interpretation: ~0 if all spare capacity sits on one node; higher when spare is spread across nodes.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def _node_used_alloc_core(
 
 
 def count_running_pods_first_snapshot(jobs: Mapping[str, Any]) -> int:
-    """仅统计 phase == Running 的 Pod（第一次 stepResult 快照）。"""
+    """Count only Pods with phase == Running (first stepResult snapshot)."""
     n = 0
     for _jname, job in (jobs or {}).items():
         if not isinstance(job, dict):
@@ -49,7 +49,7 @@ def count_running_pods_first_snapshot(jobs: Mapping[str, Any]) -> int:
 
 
 def compute_chart_metrics(resultdata: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
-    """无法解析 Nodes 时返回 None。"""
+    """Return None if Nodes cannot be parsed or is empty."""
     nodes = resultdata.get("Nodes") or resultdata.get("nodes") or {}
     jobs = resultdata.get("Jobs") or resultdata.get("jobs") or {}
     if not isinstance(nodes, dict) or not nodes:
@@ -82,7 +82,7 @@ def compute_chart_metrics(resultdata: Mapping[str, Any]) -> Optional[Dict[str, A
 
     running_pods = count_running_pods_first_snapshot(jobs)
 
-    # 附：内存侧平均分配率（前端可选用）
+    # Extra: mean memory allocation rate (optional for frontend)
     mem_rates: List[float] = []
     for _nname, ninfo in nodes.items():
         if not isinstance(ninfo, dict):

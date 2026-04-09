@@ -1,6 +1,6 @@
-"""读取 input_config 下的 YAML，并转换为 Volcano 仿真器 HTTP API 所需的字符串或路径。
+"""Load YAML under input_config and convert to strings or paths needed by the Volcano simulator HTTP API.
 
-包含：集群/负载 YAML → 仿真器侧 YAML 文本；plugins → 调度配置 YAML + 解析后的结果输出目录。
+Covers: cluster/workload YAML → simulator-side YAML text; plugins → scheduler config YAML + resolved result output directory.
 """
 
 from __future__ import annotations
@@ -14,14 +14,14 @@ from typing import Any, Dict, List, Mapping, Optional, Tuple
 import yaml
 
 _FLEXNPU_CORE_KEY = "volcano.sh/flexnpu-core.percentage"
-# 与 flexnpu_util_report 一致：取整前各容器 flexnpu_core（requests 优先），供利用率统计
+# Matches flexnpu_util_report: pre-rounding flexnpu_core per container (requests preferred), for utilization stats
 FLEXNPU_CORE_RAW_BY_CONTAINER_ANN = (
     "volcano.sh/flexnpu-core.percentage-raw-by-container"
 )
 
 
 def _ceil_to_step(value: float, step: float) -> float:
-    """将 value 向上取整到 step 的整数倍（step<=0 时原样返回）。"""
+    """Round value up to a multiple of step (unchanged if step <= 0)."""
     if step <= 0:
         return value
     return math.ceil(value / step) * step
@@ -30,7 +30,7 @@ def _ceil_to_step(value: float, step: float) -> float:
 def _round_resource_map(
     resources: Optional[Dict[str, Any]], granularity_percent: float
 ) -> None:
-    """就地按粒度向上取整 **flexnpu_core** 请求/限制；flexnpu_memory 不参与粒度舍入。"""
+    """In-place: ceil **flexnpu_core** requests/limits to granularity; flexnpu_memory is not rounded by granularity."""
     if not resources or granularity_percent <= 0:
         return
     key = _FLEXNPU_CORE_KEY
@@ -49,10 +49,10 @@ def _round_resource_map(
 
 
 def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity: float) -> None:
-    """规范 task 结构为 template.spec，并对容器 flexnpu_core 请求/限制做粒度舍入。
+    """Normalize task shape to template.spec and apply granularity rounding to container flexnpu_core requests/limits.
 
-    当 granularity > 0 时，将各容器 **取整前** 的 flexnpu_core 写入 Pod 注解
-    ``FLEXNPU_CORE_RAW_BY_CONTAINER_ANN``（JSON：容器名 -> 数值），便于报表中利用率与分配率区分。
+    When granularity > 0, store **pre-rounding** flexnpu_core per container in Pod annotation
+    ``FLEXNPU_CORE_RAW_BY_CONTAINER_ANN`` (JSON: container name -> value) so reports can separate utilization vs allocation.
     """
     if not tasks:
         return
@@ -87,7 +87,7 @@ def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity
                     else:
                         m[_FLEXNPU_CORE_KEY] = str(rounded)
             if raw_by_c:
-                # Pod 注解在 Volcano 中为 template.metadata，须与仿真器 NewJobInfoV2 合并到 Pod 一致
+                # In Volcano, Pod annotations live on template.metadata; must match simulator NewJobInfoV2 merge onto Pod
                 meta = tmpl.setdefault("metadata", {})
                 ann = meta.setdefault("annotations", {})
                 ann[FLEXNPU_CORE_RAW_BY_CONTAINER_ANN] = json.dumps(
@@ -103,7 +103,7 @@ def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity
 
 
 def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
-    """将 input_config 风格的 cluster 文档转为仿真器约定的顶层 ``cluster:`` YAML 字符串。"""
+    """Convert input_config-style cluster document to simulator top-level ``cluster:`` YAML text."""
     nodes = doc.get("nodes")
     if not nodes:
         raise ValueError("cluster config: missing 'nodes' list")
@@ -128,10 +128,10 @@ def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
 
 
 def workload_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
-    """将 workload 文档转为仅含顶层 ``jobs:`` 的仿真器 YAML。
+    """Convert workload document to simulator YAML with top-level ``jobs:`` only.
 
-    - 按 ``spec.npuGranularityPercent`` 将 **flexnpu_core** request/limit 向上取整到粒度步长（memory 不取整）；
-    - 将 ``tasks[].spec`` 映射为 Volcano Job 兼容的 ``tasks[].template.spec``。
+    - Ceil **flexnpu_core** request/limit to ``spec.npuGranularityPercent`` step (memory not rounded);
+    - Map ``tasks[].spec`` to Volcano-compatible ``tasks[].template.spec``.
     """
     spec_root = doc.get("spec") or {}
     granularity = float(spec_root.get("npuGranularityPercent") or 0)
@@ -152,7 +152,7 @@ def workload_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
 
 
 def load_cluster_for_simulator(path: str) -> str:
-    """从文件加载 cluster YAML 并返回仿真器用 nodes YAML 字符串。"""
+    """Load cluster YAML from file and return simulator nodes YAML string."""
     with open(path, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
     if not isinstance(doc, dict):
@@ -161,7 +161,7 @@ def load_cluster_for_simulator(path: str) -> str:
 
 
 def cluster_yaml_text_to_simulator_yaml(yaml_text: str) -> str:
-    """从 YAML 文本解析 cluster 文档并返回仿真器用 nodes YAML 字符串。"""
+    """Parse cluster document from YAML text and return simulator nodes YAML string."""
     doc = yaml.safe_load(yaml_text)
     if not isinstance(doc, dict):
         raise ValueError("cluster config must be a YAML mapping")
@@ -169,7 +169,7 @@ def cluster_yaml_text_to_simulator_yaml(yaml_text: str) -> str:
 
 
 def workload_yaml_text_to_simulator_yaml(yaml_text: str) -> str:
-    """从 YAML 文本解析 workload 文档并返回仿真器用 jobs YAML 字符串。"""
+    """Parse workload document from YAML text and return simulator jobs YAML string."""
     doc = yaml.safe_load(yaml_text)
     if not isinstance(doc, dict):
         raise ValueError("workload config must be a YAML mapping")
@@ -177,19 +177,19 @@ def workload_yaml_text_to_simulator_yaml(yaml_text: str) -> str:
 
 
 def workload_doc_to_simulator_yaml(doc: Dict[str, Any]) -> str:
-    """内存中的 workload 文档（已缩放等）转为仿真器 jobs YAML 字符串。"""
+    """Convert in-memory workload document (e.g. after scaling) to simulator jobs YAML string."""
     if not isinstance(doc, dict):
         raise ValueError("workload config must be a mapping")
     return workload_input_to_simulator_yaml(doc)
 
 
 def workload_npu_granularity_percent_from_doc(doc: Mapping[str, Any]) -> float:
-    """从已解析的 workload 文档读取 npuGranularityPercent。"""
+    """Read npuGranularityPercent from a parsed workload document."""
     return workload_npu_granularity_percent(doc)
 
 
 def workload_npu_granularity_percent(doc: Mapping[str, Any]) -> float:
-    """读取 workload 文档顶层 ``spec.npuGranularityPercent``（与 ``workload_input_to_simulator_yaml`` 一致）。"""
+    """Read top-level ``spec.npuGranularityPercent`` from workload doc (same as ``workload_input_to_simulator_yaml``)."""
     try:
         return float((doc.get("spec") or {}).get("npuGranularityPercent") or 0)
     except (TypeError, ValueError):
@@ -197,7 +197,7 @@ def workload_npu_granularity_percent(doc: Mapping[str, Any]) -> float:
 
 
 def workload_npu_granularity_percent_from_file(path: str) -> float:
-    """从 workload YAML 文件读取 ``npuGranularityPercent``；非法或缺失时返回 0。"""
+    """Read ``npuGranularityPercent`` from workload YAML file; return 0 if invalid or missing."""
     with open(path, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
     if not isinstance(doc, dict):
@@ -206,7 +206,7 @@ def workload_npu_granularity_percent_from_file(path: str) -> float:
 
 
 def load_workload_for_simulator(path: str) -> str:
-    """从文件加载 workload YAML 并返回仿真器用 jobs YAML 字符串。"""
+    """Load workload YAML from file and return simulator jobs YAML string."""
     with open(path, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
     if not isinstance(doc, dict):
@@ -215,16 +215,16 @@ def load_workload_for_simulator(path: str) -> str:
 
 
 def resolve_out_dir_pattern(out_dir: str, now: Optional[datetime] = None) -> str:
-    """将 ``outDir`` 中的 ``{date}`` 替换为 ``年-月-日-时-分-秒`` 时间戳（默认当前时间）。"""
+    """Replace ``{date}`` in ``outDir`` with a ``YYYY-MM-DD-HH-MM-SS`` timestamp (default: now)."""
     now = now or datetime.now()
     stamp = now.strftime("%Y-%m-%d-%H-%M-%S")
     return out_dir.replace("{date}", stamp)
 
 
 def load_plugins_for_simulator(path: str) -> Tuple[str, str]:
-    """加载 plugins YAML，返回 (调度器配置 YAML 字符串, 展开 {date} 后的结果输出目录绝对路径)。
+    """Load plugins YAML; return (scheduler config YAML string, absolute result out dir after expanding {date}).
 
-    ``scheduler`` 块会作为 ``/step`` 的 conf；``output.outDir`` 支持 ``{date}`` 占位符。
+    The ``scheduler`` block is sent as ``/step`` conf; ``output.outDir`` may use a ``{date}`` placeholder.
     """
     with open(path, "r", encoding="utf-8") as f:
         doc = yaml.safe_load(f)
@@ -249,7 +249,7 @@ def plugins_document_scheduler_and_outdir(
     doc: Dict[str, Any],
     result_out_dir: str,
 ) -> Tuple[str, str]:
-    """从已解析的 plugins 文档取 scheduler 块，并将结果目录设为 ``result_out_dir``（绝对路径）。"""
+    """Take scheduler block from a parsed plugins document and set result directory to ``result_out_dir`` (absolute)."""
     if not isinstance(doc, dict):
         raise ValueError("plugins config must be a YAML mapping")
     scheduler = doc.get("scheduler")

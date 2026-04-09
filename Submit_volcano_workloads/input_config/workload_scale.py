@@ -1,4 +1,4 @@
-"""Workload 缩放：对每个 task 的 replicas 按系数做乘法后向上取整。"""
+"""Workload scaling: multiply each task's replicas by a factor, then round up."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 
 def scale_workload_document(doc: Dict[str, Any], factor: float) -> Dict[str, Any]:
-    """返回深拷贝后的文档，jobs[].spec.tasks[].replicas -> ceil(replicas * factor)，至少为 1。"""
+    """Return a deep copy with jobs[].spec.tasks[].replicas set to ceil(replicas * factor), minimum 1."""
     out = copy.deepcopy(doc)
     if not isinstance(out, dict):
         return out
