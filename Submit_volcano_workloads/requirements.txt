@@ -1,9 +1,62 @@
-# Volcano Submit_volcano_workloads + Web API
+# =============================================================================
+# Submit_volcano_workloads — Python dependencies
+# =============================================================================
+# Install (from this directory):
+#   pip install -r requirements.txt
+#
+# Python: 3.8+ required; 3.10+ recommended for FastAPI + Pydantic v2.
+#
+# Two entry points share this file:
+#   1) CLI:  python SimRun.py          — needs "Core" packages only if you omit Web
+#   2) Web:  uvicorn sim_web_api:app  — needs Core + "Web stack" packages
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core — SimRun.py, input_config/* (HTTP client + YAML + reports to Go simulator)
+# -----------------------------------------------------------------------------
+# Used by: JsonHttpClient, input_config_loader, flexnpu_util_report,
+#          output_csv_reports, SimRun.reset / SimRun.step
 requests>=2.28.0
+#   Blocking HTTP client with retry loop for /reset, /step, /stepResult.
+
 PyYAML>=6.0
+#   Safe load/dump of cluster, workload, plugins YAML; worker also uses
+#   yaml.safe_load for uploaded configs in sim_web_api.
+
 munch>=2.5.0
+#   SimRun helper: munchify on API response fragments (optional pattern).
+
 prettytable>=3.6.0
+#   SimRun: PrettyTable for pod phase summary printed after each step.
+
+# -----------------------------------------------------------------------------
+# Web stack — sim_web_api.py (FastAPI ASGI app + multipart + RunState model)
+# -----------------------------------------------------------------------------
 fastapi>=0.109.0
+#   Routes: /api/health, /api/status, POST /api/runs, GET /api/runs/latest/export,
+#   GET /; CORS middleware; File/Form uploads.
+
 uvicorn[standard]>=0.27.0
+#   ASGI server. [standard] adds uvloop, httptools, watchfiles (faster dev).
+#   Example: uvicorn sim_web_api:app --host 127.0.0.1 --port 8765
+
 python-multipart>=0.0.6
+#   Required by Starlette/FastAPI to parse multipart/form-data for
+#   cluster, workload, workload_scales, and multiple plugins file fields.
+
 pydantic>=2.0.0
+#   RunState BaseModel (status, progress_percent, chart, error, run_dir, …).
+
+# -----------------------------------------------------------------------------
+# Transitive / notable (installed automatically; listed for troubleshooting)
+# -----------------------------------------------------------------------------
+# starlette   — FastAPI dependency (routing, StaticFiles on /assets).
+# typing-extensions — Pydantic v2 on older Python.
+# idna, urllib3, certifi — pulled in by requests.
+
+# -----------------------------------------------------------------------------
+# Optional (not installed by default; add if you need them)
+# -----------------------------------------------------------------------------
+# httpx          — alternative async HTTP client for tests
+# pytest         — unit tests
+# ruff / black   — lint & format

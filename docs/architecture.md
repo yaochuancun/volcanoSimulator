@@ -20,18 +20,23 @@ volcanoSimulator/
 │           ├── cache/          # Scheduler cache (some paths relate to real kube)
 │           ├── conf/           # Scheduler config parsing (tiers, plugin args)
 │           └── util/           # Node helpers, priority queue, etc.
-├── Submit_volcano_workloads/   # Python: config conversion, HTTP client, reports
-│   ├── SimRun.py               # Client main flow
+├── Submit_volcano_workloads/   # Python: config conversion, HTTP client, reports, Web API
+│   ├── SimRun.py               # CLI: reset → step → poll stepResult; writes CSVs
+│   ├── sim_web_api.py          # FastAPI: uploads, matrix runs, /api/*, serves static/
+│   ├── static/                 # Web UI: index.html, app.js, styles.css (mounted /assets)
+│   ├── var/sim_web_runs/       # Web run storage (per run_id; .gitignore)
+│   ├── requirements.txt        # pip deps: core + FastAPI stack (see file header)
 │   ├── common/utils/
 │   │   └── json_http_client.py # HTTP + JSON (with retries)
 │   ├── input_config/
-│   │   ├── input_config_loader.py
+│   │   ├── input_config_loader.py  # YAML → simulator strings; plugins outDir
 │   │   ├── flexnpu_util_report.py
 │   │   ├── output_csv_reports.py
-│   │   ├── phase2_completion_reports.py
+│   │   ├── sim_metrics.py      # Chart metrics from stepResult (Web + reuse)
+│   │   ├── workload_scale.py   # replicas × factor, ceil (Web matrix)
 │   │   └── __init__.py
 │   ├── figures/                # Legacy plotting scripts (off the main path)
-│   └── result/                 # Default result root (often .gitignore)
+│   └── result/                 # SimRun default result root (often .gitignore)
 └── docs/
     ├── requirements.md
     ├── architecture.md       # This file
@@ -79,7 +84,7 @@ flowchart TB
 | Layer | Role |
 | --- | --- |
 | **Presentation / I/O** | `main.go` registers routes; `JsonHttpClient` issues requests and `json.loads` responses |
-| **Orchestration** | `SimRun`: `reset` → `step` → poll `stepResult`; inject `npuGranularityPercent`; write **phase1/** (and **phase2/** when `runningTime` is used) |
+| **Orchestration** | `SimRun`: `reset` → `step` → poll `stepResult`; inject `npuGranularityPercent`; write CSVs / FlexNPU text under `plugins` `outDir`. **`sim_web_api`** runs the same `reset`/`step` in a worker thread for each (plugin × scale) cell. |
 | **Simulation domain** | `ClusterInfo` + per-second loop: admit Jobs, container startup countdown, scheduling Session, advance `NowTime`, optional **`processSimRunningTimeouts`** |
 | **Scheduler core** | Volcano `framework` + `actions` + `plugins`, driven by YAML |
 | **Observability** | `flexnpu_util_report` estimates FlexNPU from snapshots; `output_csv_reports` writes CSVs |
@@ -153,10 +158,16 @@ SimRun.py
   │     └── PyYAML: cluster/workload/plugins → strings / paths
   ├── input_config.flexnpu_util_report
   │     └── print_flexnpu_utilization / compute_flexnpu_snapshot
-  ├── input_config.output_csv_reports
-  │     └── write_output_config_csvs → uses compute_flexnpu_snapshot
-  └── input_config.phase2_completion_reports
-        └── write_phase2_completion_reports (after simPhase2Ready)
+  └── input_config.output_csv_reports
+        └── write_output_config_csvs → uses compute_flexnpu_snapshot
+
+sim_web_api.py
+  ├── SimRun.reset, SimRun.step  (same HTTP flow as CLI; step returns snapshot dict)
+  ├── input_config_loader: cluster_yaml_text_to_simulator_yaml,
+  │       workload_doc_to_simulator_yaml, workload_npu_granularity_percent_from_doc,
+  │       plugins_document_scheduler_and_outdir
+  ├── workload_scale.scale_workload_document
+  └── sim_metrics.compute_chart_metrics
 ```
 
 ### 4.2 `input_config_loader`
@@ -164,6 +175,7 @@ SimRun.py
 - **`cluster_input_to_simulator_yaml`:** YAML → simulator `cluster:` text.
 - **`workload_input_to_simulator_yaml`:** normalize `tasks[].template`; **`npuGranularityPercent`** rounds **flexnpu_core** only; writes **`volcano.sh/flexnpu-core.percentage-raw-by-container`** on `template.metadata.annotations`; maps **`runningTime`** to **`volcano.sh/sim-running-time-seconds`**.
 - **`load_plugins_for_simulator`:** extract scheduler YAML and **`output.outDir`** (`{date}` expansion).
+- **Web-oriented helpers (same module):** **`cluster_yaml_text_to_simulator_yaml`**, **`workload_yaml_text_to_simulator_yaml`**, **`workload_doc_to_simulator_yaml`**, **`workload_npu_granularity_percent_from_doc`**, **`plugins_document_scheduler_and_outdir(doc, result_out_dir)`** — bypass `{date}` for uploads by forcing an absolute per-cell result directory.
 
 ### 4.3 `flexnpu_util_report`
 
@@ -175,9 +187,98 @@ SimRun.py
 - **`write_output_config_csvs`:** builds the snapshot and writes **Node_desc / POD_desc / npu_chip / summary**.
 - **`sim_clock`:** from **`resultdata["Clock"]` / `clock`** for POD **`submit_time`** fallback.
 
+### 4.5 `workload_scale`
+
+- **`scale_workload_document(doc, factor)`:** deep-copies workload YAML; for each job task with **`replicas`**, sets **`replicas = max(1, ceil(replicas * factor))`** (used by the Web matrix).
+
+### 4.6 `sim_metrics`
+
+- **`compute_chart_metrics(resultdata)`:** reads **`Nodes`** / **`Jobs`** from a **`stepResult`**-shaped dict.
+  - **`allocation_rate_avg`:** mean of per-node **flexnpu_core** allocation rate (%), consistent with **Node_desc** (scheduler **Used/Allocatable** scalars ÷ 1000).
+  - **`running_pods`:** count of Pods with **`status.phase == "Running"`** (first snapshot after `step`).
+  - **`fragmentation_rate`:** \((\sum_i \mathrm{remain}_i - \max_i \mathrm{remain}_i) / \sum_i \mathrm{cap}_i \times 100\) where **remain** = allocatable − used core per node (same units as above).
+  - Also returns aggregate capacity/remaining fields for debugging or future UI.
+
 ---
 
-## 5. Runtime sequence (one `SimRun`)
+## 5. Web UI architecture (`sim_web_api.py` + `static/`)
+
+### 5.1 Purpose and constraints
+
+- **Single-user, single concurrent run:** `POST /api/runs` returns **409** if the worker thread from a previous submission is still **`thread.is_alive()`**.
+- **Browser never talks to Go directly:** the FastAPI process calls **`VOLCANO_SIM_URL`** (default **`http://127.0.0.1:8006`**) via **`requests`** for health checks and via **`SimRun.reset` / `SimRun.step`** (which use **`JsonHttpClient`**) for simulation.
+- **Static assets:** **`GET /`** serves **`static/index.html`**. **`GET /assets/*`** is a **`StaticFiles`** mount of **`static/`** (CSS/JS), registered **after** API routes so **`/api/*`** is never shadowed.
+
+### 5.2 Run matrix
+
+For each uploaded **plugins** file \(i\) (each must contain a **`scheduler`** block) and each numeric **workload scale** \(s\) from comma-separated **`workload_scales`**:
+
+1. **`scale_workload_document(base_workload, s)`** then **`workload_doc_to_simulator_yaml`**.
+2. **`plugins_document_scheduler_and_outdir(plug_doc, out_sub)`** with **`out_sub = var/sim_web_runs/<run_id>/results/<algo_id>_scale_<s>/`** (dots in scale normalized for path segments).
+3. **`reset(sim_url, nodes_yaml, workload_yaml)`** then **`step(..., pods_url, npu_granularity)`**.
+4. **`step`** returns the snapshot dict; **`compute_chart_metrics`** merges into **`RunState.chart.points`**; same directory receives **`write_output_config_csvs`** output as in CLI (**tasksSUM.csv**, **Node_desc.csv**, etc.).
+
+Uploaded text is normalized (**BOM strip**, newline unify, collapse duplicate blank lines) before save under **`input/`**.
+
+### 5.3 Process and state
+
+| Mechanism | Role |
+| --- | --- |
+| **`threading.Thread`** | Runs **`_run_simulation_worker`** so **`POST /api/runs`** returns immediately with **`run_id`**. |
+| **`_active` dict** | **`run_id`**, **`thread`**, **`state`** (`RunState` pydantic instance). |
+| **`_lock`** | Held only for starting a run and reading **`run_id`/`state`** references; worker mutates **`state`** in place (acceptable for this single-run UI). |
+| **`RunState`** | **`status`**: `running` \| `succeeded` \| `failed`; **`progress_percent`**, **`done_steps`**, **`total_steps`**, **`message`**, **`chart`**, **`error`**, **`run_dir`**. |
+
+Progress updates: small bump at loop start; after **`reset`**, **`~35%` of one matrix cell** before **`step`**; after each cell completes, **`done_steps/total*100`**. **`manifest.json`** and **`chart_data.json`** are written at success under **`run_dir`**.
+
+### 5.4 HTTP API summary
+
+| Method | Path | Description |
+| --- | --- | --- |
+| **GET** | **`/api/health`** | **`simulator_reachable`**: POST **`/stepResult`** to Go with short timeout; returns **`simulator_url`**, **`simulator_detail`**. |
+| **GET** | **`/api/status`** | **`{ "run_id", "state": RunState.model_dump() }`** — frontend reads **`state.progress_percent`**, **`state.chart`**, etc. |
+| **POST** | **`/api/runs`** | **multipart**: **`cluster`**, **`workload`**, **`workload_scales`**, one or more **`plugins`** files. Validates YAML; saves under **`var/sim_web_runs/<id>/input/`**; starts worker. |
+| **GET** | **`/api/runs/latest/export`** | ZIP of **`results/**`** tree + **`manifest.json`** + **`chart_data.json`**; **409** unless last run **`succeeded`**. |
+| **GET** | **`/`** | **`index.html`** |
+
+**CORS:** **`allow_origins=["*"]`** for local/dev; tighten for production.
+
+### 5.5 Web data flow (high level)
+
+```mermaid
+flowchart TB
+  subgraph browser [Browser]
+    UI[static/app.js + index.html]
+  end
+  subgraph fastapi [FastAPI sim_web_api]
+    API["/api/health /api/status /api/runs /export"]
+    WRK[Thread: _run_simulation_worker]
+    API -->|starts| WRK
+  end
+  subgraph py [Python reuse]
+    SR[SimRun.reset / SimRun.step]
+    MET[sim_metrics / workload_scale / loader]
+    WRK --> SR
+    WRK --> MET
+  end
+  subgraph go [Go cmd/sim]
+    HTTP[:8006 /reset /step /stepResult]
+  end
+  UI <-->|JSON| API
+  SR <--> HTTP
+  API -->|requests health| HTTP
+```
+
+### 5.6 Frontend behavior (see `static/app.js`)
+
+- Polls **`/api/health`** every 4s; shows **Simulator: OK** vs **Simulator: not OK (detail)**.
+- **Start Simulation** stays **disabled** until **`simulator_reachable`** and is disabled again while a run is in progress (after **`POST` succeeds**).
+- Polls **`/api/status`** ~400ms while running; progress bar uses **`state.progress_percent`**.
+- File inputs are **hidden**; **Choose file…** / **No file chosen** buttons avoid OS-locale native file widget strings.
+
+---
+
+## 6. Runtime sequence (one `SimRun`)
 
 ```mermaid
 sequenceDiagram
@@ -201,13 +302,12 @@ sequenceDiagram
     end
   end
 
-  Py->>Py: Phase1: npuGranularityPercent, flexnpu txt, CSVs under phase1/
-  Py->>Py: Phase2 (optional): poll simPhase2Ready, pod/job completion CSVs
+  Py->>Py: Inject npuGranularityPercent; flexnpu txt + CSVs under plugins outDir
 ```
 
 ---
 
-## 6. `stepResult` payload (`simulator.Info`)
+## 7. `stepResult` payload (`simulator.Info`)
 
 | JSON field (subset) | Source | Python consumer |
 | --- | --- | --- |
@@ -216,14 +316,14 @@ sequenceDiagram
 | `nodes` | `[]*v1.Node` summary | Optional |
 | `pods` | `[]*v1.Pod` | Redundant with Pods under Jobs; main path uses **Jobs.Tasks[].Pod** |
 | `clock` | `NowTime.Local().String()` | CSV `submit_time` fallback, reporting context |
-| `simPhase2Ready` | Computed when timed tasks policy is satisfied | `SimRun` phase-2 gate |
+| `simPhase2Ready` | Computed when timed tasks policy is satisfied | Go exposes in JSON; current **`SimRun.py`** / **`sim_web_api`** path uses a single **`step`** snapshot only (no extra phase-2 client loop in repo) |
 | `done` / `NotCompletion` | Completion flags | Depends on struct tags / encoding |
 
 **Note:** Go `encoding/json` uses exported field names; verify against live responses (commonly **`Jobs`**, **`Nodes`**, **`clock`**).
 
 ---
 
-## 7. Where to change things
+## 8. Where to change things
 
 | Goal | Start here |
 | --- | --- |
@@ -233,14 +333,18 @@ sequenceDiagram
 | Plugins / action chain | `plugins/*.yaml`, `pkg/scheduler/actions`, `UnmarshalSchedulerConfV2` |
 | FlexNPU rounding / annotations | `input_config_loader.py`, `flexnpu_util_report.py` (`estimate_card_usage`) |
 | CSV columns | `output_csv_reports.py` |
-| Client flow / phases | `SimRun.py`, `phase2_completion_reports.py` |
+| Client flow | `SimRun.py` |
+| Web API / uploads / progress | `sim_web_api.py`, `static/app.js` |
+| Web chart metrics | `input_config/sim_metrics.py` |
+| Workload scale matrix | `input_config/workload_scale.py` |
 
 ---
 
-## 8. Related documents
+## 9. Related documents
 
 - [**requirements.md**](./requirements.md): scope, I/O contracts, terminology.  
 - [**功能清单与待办.md**](./功能清单与待办.md): implemented vs optional checklist.  
-- [**README.md**](../README.md): build/run and directory overview.  
+- [**README.md**](../README.md): build/run, Web UI, directory overview.  
+- [**Submit_volcano_workloads/requirements.txt**](../Submit_volcano_workloads/requirements.txt): Python packages and rationale.  
 - [**Submit_volcano_workloads/input_config/README.md**](../Submit_volcano_workloads/input_config/README.md): input file roles.  
-- [**10-Web界面与后端编排架构讨论.md**](./10-Web界面与后端编排架构讨论.md): Web UI, single-user single-run, Python Worker (scheme B), multi-algorithm batch, workload scale, ZIP export.
+- [**10-Web界面与后端编排架构讨论.md**](./10-Web界面与后端编排架构讨论.md): product-level Web discussion (draft; implementation is `sim_web_api` + `static/`).

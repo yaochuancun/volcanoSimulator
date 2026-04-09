@@ -1,77 +1,98 @@
 # volcanoSimulator
 
-本仓库包含 **Volcano 调度仿真器（Go）** 与 **仿真负载提交客户端（Python）**：用 YAML 描述集群、作业与调度插件，通过 HTTP 驱动仿真，并落盘任务摘要、FlexNPU 利用率及标准 CSV 报表。
+This repository contains a **Volcano scheduling simulator (Go)** and a **Python workload client**: describe clusters, jobs, and scheduler plugins in YAML, drive the simulation over HTTP, and write task summaries, FlexNPU utilization, and standard CSV reports to disk. It also ships a **browser-based single-page Web UI** for batch runs across **multiple scheduler configs × multiple workload scale factors** and ZIP export—without using the command line for uploads.
 
-许可与第三方说明见根目录 [**LICENSE**](LICENSE)、[**许可说明.md**](许可说明.md)。输入文件细分说明见 [**Submit_volcano_workloads/input_config/README.md**](Submit_volcano_workloads/input_config/README.md)。
-
----
-
-## 一、主要功能
-
-- **配置驱动仿真**（配置位于 `Submit_volcano_workloads/input_config/`）  
-  - **集群**：`cluster/*.yaml` 描述节点、FlexNPU 注解（如 `flexnpu-core.percentage-list`、`flexnpu-memory.128mi-list`、`topologies`）及可调度资源。  
-  - **负载**：`workload/*.yaml` 描述 Volcano Job 列表，支持 `npuGranularityPercent`（仅对 **flexnpu_core** 的 request/limit 按粒度上取整；memory 不取整）、`volcano.sh/flexnpu-num` 等。  
-  - **调度**：`plugins/*.yaml` 中的 `scheduler` 块（actions、tiers、插件参数）会作为调度器配置下发；`output.outDir` 中的 `{date}` 会展开为时间戳，用于结果根目录。
-
-- **与仿真器交互**  
-  - `reset`：上传转换后的节点 YAML 与作业 YAML，初始化集群与 Job 队列。  
-  - `step`：上传调度器配置，推进调度回合。  
-  - `stepResult`：拉取当前 `Jobs`、`Nodes`、Pod 列表及仿真时钟等，用于统计与报表。
-
-- **结果产物**（默认在 `plugins.yaml` 解析出的 `Submit_volcano_workloads/result/<run 目录>/` 下，与 `tasksSUM.csv` 等平铺）  
-  - `tasksSUM.csv`、`pod_phase_count.txt`  
-  - `flexnpu_utilization.txt`：节点级 FlexNPU 利用率、逐卡估算、Pod→卡映射说明  
-  - `Node_desc.csv`、`POD_desc.csv`、`npu_chip.csv`、`summary.csv`（与上述同目录）  
-
-- **Python 辅助模块**（`Submit_volcano_workloads/input_config/` 包）  
-  - `input_config_loader`：将上述 YAML 转为仿真器期望的 `cluster` / `jobs` / scheduler conf 格式。  
-  - `flexnpu_util_report`：基于 `stepResult` 解析 FlexNPU 标量资源与注解。  
-  - `output_csv_reports`：生成四类 CSV 报表。
+License and third-party notes: root [**LICENSE**](LICENSE), [**LICENSE-NOTES.md**](LICENSE-NOTES.md). Input layout details: [**Submit_volcano_workloads/input_config/README.md**](Submit_volcano_workloads/input_config/README.md). **Architecture (English):** [**docs/architecture.md**](docs/architecture.md). **Per-package dependency notes:** [**Submit_volcano_workloads/requirements.txt**](Submit_volcano_workloads/requirements.txt).
 
 ---
 
-## 二、架构
+## 1. Main features
+
+### 1.1 Configuration-driven simulation (`Submit_volcano_workloads/input_config/`)
+
+- **Cluster:** `cluster/*.yaml` — nodes, FlexNPU annotations (e.g. `flexnpu-core.percentage-list`, `flexnpu-memory.128mi-list`, `topologies`), and schedulable resources.  
+- **Workload:** `workload/*.yaml` — Volcano Job list; supports `npuGranularityPercent` (**flexnpu_core** request/limit rounded up to the step; memory not rounded), `volcano.sh/flexnpu-num`, etc.  
+- **Scheduling:** `plugins/*.yaml` — the `scheduler` block (actions, tiers, plugin args) is sent as scheduler config; `output.outDir` with `{date}` expands to a timestamp for the **CLI SimRun** result root.
+
+### 1.2 Talking to the simulator (Go HTTP)
+
+- **`/reset`** — send converted node and workload YAML; initialize cluster and job queue.  
+- **`/step`** — send scheduler config; advance the scheduling round.  
+- **`/stepResult`** — fetch current `Jobs`, `Nodes`, pods, simulation clock, etc.; may return placeholder **`"0"`** or JSON number **`0`** while the round is not ready (Python uses `str(result) == '0'`).
+
+### 1.3 CLI artifacts (`SimRun.py` + `plugins` `outDir`)
+
+Written flat under the directory resolved from **`plugins.yaml`** (typical path like `Submit_volcano_workloads/result/<timestamp>/`):
+
+| File | Description |
+| --- | --- |
+| `tasksSUM.csv` | Pod name, Job, Phase, NodeName |
+| `pod_phase_count.txt` | Pending / Running counts, etc. |
+| `flexnpu_utilization.txt` | Node-level FlexNPU, per-card estimate, pod→card notes |
+| `Node_desc.csv` / `POD_desc.csv` / `npu_chip.csv` / `summary.csv` | Stats and per-card reports |
+
+### 1.4 Python modules (`Submit_volcano_workloads/input_config/`)
+
+| Module | Role |
+| --- | --- |
+| `input_config_loader` | Disk or in-memory YAML → simulator `cluster` / `jobs` / scheduler conf; Web uploads use **`cluster_yaml_text_to_simulator_yaml`**, **`workload_doc_to_simulator_yaml`**, **`plugins_document_scheduler_and_outdir`**, etc. |
+| `flexnpu_util_report` | Parse FlexNPU from `stepResult`; **`compute_flexnpu_snapshot`** |
+| `output_csv_reports` | **`write_output_config_csvs`** — four CSV types |
+| `workload_scale` | **`scale_workload_document`**: `replicas → max(1, ceil(replicas × factor))` for the Web matrix |
+| `sim_metrics` | **`compute_chart_metrics`**: mean node allocation rate, first-snapshot **Running** pod count, fragmentation rate, etc., for Web charts |
+
+### 1.5 Web UI (`sim_web_api.py` + `static/`)
+
+- **Entry:** from `Submit_volcano_workloads`, run `uvicorn sim_web_api:app`; open the app root (e.g. `http://127.0.0.1:8765/`).  
+- **Static assets:** `GET /` serves **`static/index.html`**; CSS/JS under **`/assets/*`** (same folder), registered separately from **`/api/*`** to avoid route clashes.  
+- **Uploads:** **cluster.yaml**, **workload.yaml**, **multiple plugins.yaml** (one scheduler per file; each must include a **`scheduler`** block); **Workload scale** is a comma-separated list of numbers.  
+- **Scaling rule:** for each scale factor, workload replicas become **`ceil(replicas × factor)`**, at least 1.  
+- **Execution model:** **single user, one concurrent run** — if the previous worker thread is still alive, **`POST /api/runs`** returns **409**.  
+- **Backend chain:** same as CLI: for each **(plugins_i, scale_j)** run **`reset` → `step`**; results under **`var/sim_web_runs/<run_id>/results/<algo>_scale_<s>/`** (overrides per-file `output.outDir` semantics for that run).  
+- **Progress:** **`GET /api/status`** returns **`{ run_id, state }`** with **`state.progress_percent`**, **`state.message`**, **`state.chart`** for the bar and charts; **`GET /api/health`** checks whether the Go simulator is reachable (**`VOLCANO_SIM_URL`**, default `http://127.0.0.1:8006`).  
+- **Frontend:** **Start Simulation** disabled when the simulator is **not OK**; health polling; custom English file buttons (avoids OS-locale strings like “No file chosen”).  
+- **Export:** **`GET /api/runs/latest/export`** ZIPs the last **successful** run’s **`results/**`** plus **`manifest.json`** / **`chart_data.json`** (**409** if not finished).
+
+### 1.6 Other directories
+
+- **`Submit_volcano_workloads/common/`** — `JsonHttpClient`, etc.  
+- **`Submit_volcano_workloads/figures/`** — legacy plotting (off the main path).  
+- **`Volcano_simulator/`** and **`Submit_volcano_workloads/`** are siblings; build and run separately.
+
+---
+
+## 2. Architecture snapshot
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Submit_volcano_workloads/ (Python)                         │
 │  SimRun.py ──► JsonHttpClient ──► HTTP JSON                  │
+│  sim_web_api.py ──► same reset/step + FastAPI / static UI   │
 │       │              ▲                                       │
 │       ▼              │                                       │
-│  input_config/       │     stepResult（Jobs, Nodes, Pods…）   │
-│  · loader / flexnpu  │                                       │
-│  · output_csv        │                                       │
+│  input_config/     │     stepResult (Jobs, Nodes, …)       │
+│  · loader / flexnpu │                                       │
+│  · output_csv      │                                       │
+│  · sim_metrics      │                                       │
+│  · workload_scale   │                                       │
 └──────────────────────┼───────────────────────────────────────┘
-                       │  :8006
+                       │  :8006 (default)
                        ▼
 ┌─────────────────────────────────────────────────────────────┐
 │  Volcano_simulator/cmd/sim (Go)                             │
-│  /reset  /step  /stepResult — 内嵌 Volcano 调度框架仿真循环   │
+│  /reset  /step  /stepResult                                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-- **职责划分**  
-  - **Go 仿真器**：维护 `ClusterInfo`、执行 enqueue/allocate 等 action、更新 Pod/Task 状态；不负责解析 `input_config` 目录结构。  
-  - **Python 端**：负责配置转换、调用顺序、结果整理与 CSV/文本报告；**不修改**调度算法本身。
-
-- **数据流概要**  
-  1. Loader 读 `cluster` / `workload` / `plugins`，生成仿真器可消费的 YAML 字符串。  
-  2. `reset` 将节点、负载写入仿真器内存。  
-  3. `step` 加载 scheduler 配置并执行调度。  
-  4. `stepResult` 返回快照；Python 写盘并生成 FlexNPU 与 CSV 报表。
-
-- **其他目录**  
-  - `Submit_volcano_workloads/common/`：如 `JsonHttpClient` 等通用工具（新特性优先放在 `input_config/`，见 `input_config/__init__.py` 说明）。  
-  - `Submit_volcano_workloads/figures/`：历史作图脚本（当前主流程可不启用）。  
-  - **`Volcano_simulator/`** 与 **`Submit_volcano_workloads/`** 为仓库内并列目录，需分别构建/运行。
+Layers, **Web API table**, **`stepResult` fields**, and where to edit: [**docs/architecture.md**](docs/architecture.md).
 
 ---
 
-## 三、运行方式
+## 3. How to run
 
-### 1. 启动仿真器（Go）
+### 3.1 Start the simulator (Go)
 
-在仓库根目录进入仿真器工程并编译、运行（监听 **8006** 端口，与 `SimRun.py` 中 `sim_base_url` 一致）：
+Build and run under the simulator tree (default port **8006**, matches Python `sim_base_url` / **`VOLCANO_SIM_URL`**):
 
 ```bash
 cd Volcano_simulator/cmd/sim
@@ -79,49 +100,74 @@ go build -o sim .
 ./sim
 ```
 
-（Windows 下可执行 `main.exe` 或等价命令；具体以本机 Go 环境为准。）
+(On Windows, use `sim.exe` or equivalent.)
 
-### 2. Python 环境与依赖
+### 3.2 Python dependencies (use `requirements.txt`)
 
-建议使用 Python 3.8+，在客户端目录下安装依赖（至少包含 `requests`、`PyYAML`、`prettytable` 等）：
+**Web and CLI share** one list: [**Submit_volcano_workloads/requirements.txt**](Submit_volcano_workloads/requirements.txt) (comments explain each package).
 
 ```bash
 cd Submit_volcano_workloads
-pip install requests pyyaml prettytable
+pip install -r requirements.txt
 ```
 
-### 3. 执行一次仿真
+For **`SimRun.py` only**, you still need **`requests`**, **`PyYAML`**, **`prettytable`**, **`munch`**; the Web stack adds **FastAPI**, **uvicorn**, **python-multipart**, **pydantic v2**.
 
-确认仿真器已监听 `http://localhost:8006` 后：
+**Python 3.8+ recommended; 3.10+ preferred** for Pydantic v2 / FastAPI tooling.
+
+### 3.3 Run one simulation from the CLI
+
+With the simulator listening on **`http://localhost:8006`** (or your URL):
 
 ```bash
 cd Submit_volcano_workloads
 python SimRun.py
 ```
 
-### 4. Web 单页（上传 cluster / workload / 多份 plugins，算法 × 缩放矩阵）
+Edit **`cluster_path`**, **`workload_path`**, **`plugins_path`** in **`SimRun.py`** under **`if __name__ == '__main__':`**.
 
-需先启动 Go 仿真器（默认 `http://127.0.0.1:8006`）。在 `Submit_volcano_workloads` 下安装依赖并启动 API（静态页与 `/api/*` 同源）：
+### 3.4 Web UI (upload + matrix + export)
+
+1. Keep the Go simulator running.  
+2. Optional env: **`VOLCANO_SIM_URL`**, e.g. `http://127.0.0.1:8006`.  
+3. Start the ASGI server:
 
 ```bash
 cd Submit_volcano_workloads
-pip install -r requirements.txt
 uvicorn sim_web_api:app --host 127.0.0.1 --port 8765
 ```
 
-浏览器访问 **http://127.0.0.1:8765/**。单次仅允许一个仿真任务；结果保存在 `Submit_volcano_workloads/var/sim_web_runs/<run_id>/`，可通过页面 **Export Data** 下载各组合目录下 CSV 等的 ZIP。环境变量 **`VOLCANO_SIM_URL`** 可覆盖仿真器地址。
+4. Open **`http://127.0.0.1:8765/`** in a browser.
 
-### 5. 修改输入与结果路径
+**Local storage layout (usually `.gitignore`d):**
 
-- 在 **`Submit_volcano_workloads/SimRun.py`** 的 `if __name__ == '__main__':` 中修改：  
-  `cluster_path`、`workload_path`、`plugins_path`（例如 `cluster_1.yaml`、`workload_1.yaml` 等）。  
-- 结果根目录由 **`Submit_volcano_workloads/input_config/plugins/*.yaml`** 的 `output.outDir` 决定（支持 `{date}`）；产物直接写入该目录，不再建 `tasks/<时间戳>/` 或 `statistics/` 子目录。
+```
+Submit_volcano_workloads/var/sim_web_runs/<run_id>/
+  input/              # Normalized cluster.yaml, workload.yaml, plugin_*.yaml
+  results/            # One subdir per algorithm × scale; same CSV/text as CLI
+  manifest.json       # Run metadata and metric points
+  chart_data.json     # Aggregated structure for replaying charts in the UI
+```
 
-### 6. 说明与校验
+### 3.5 Change input and output paths (CLI)
 
-- 各输入子目录说明见 **`Submit_volcano_workloads/input_config/README.md`**。  
-- 本地仿真结果路径见根目录 **`.gitignore`**（如 `Submit_volcano_workloads/result/`），请勿将大结果目录提交到远端。
+- **Inputs:** **`cluster_path`** / **`workload_path`** / **`plugins_path`** in **`SimRun.py`**.  
+- **Output:** **`output.outDir`** in **`plugins.yaml`** (supports **`{date}`**).
+
+### 3.6 Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| Web shows **Simulator: not OK** | Is Go listening on **`VOLCANO_SIM_URL`**? Firewall? Can **`requests`** POST **`/stepResult`** from this machine? |
+| **Start Simulation** grayed out | Health check failing, or a previous run still in progress (**409**). |
+| Progress bar stuck | **`/api/status`** should return **`{ "state": { "progress_percent": ... } }`**; the frontend also accepts a legacy flat JSON shape. |
+| Dependency conflicts | Use **`python -m venv .venv`** then **`pip install -r requirements.txt`**. |
+
+### 3.7 Notes and hygiene
+
+- Input subfolders: **`Submit_volcano_workloads/input_config/README.md`**.  
+- Do not commit large result trees: see root **`.gitignore`** (**`Submit_volcano_workloads/result/`**, **`var/`**, etc.).
 
 ---
 
-如有调度行为、端口或 API 变更，请以 **`Volcano_simulator/cmd/sim/main.go`** 与 **`Submit_volcano_workloads/SimRun.py`** 中的实际配置为准。
+If scheduling behavior, ports, or HTTP contracts change, treat **`Volcano_simulator/cmd/sim/main.go`**, **`Submit_volcano_workloads/SimRun.py`**, and **`Submit_volcano_workloads/sim_web_api.py`** as the source of truth.
