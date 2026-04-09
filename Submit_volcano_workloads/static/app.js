@@ -19,6 +19,14 @@
 
   let statusTimer = null;
   let runPollTimer = null;
+  /** Go simulator /stepResult reachable (from /api/health). */
+  let simulatorReachable = false;
+  /** POST /api/runs accepted and polling until succeeded/failed. */
+  let runInProgress = false;
+
+  function syncStartButton() {
+    els.btnRun.disabled = !simulatorReachable || runInProgress;
+  }
 
   function wireFilePicker(input, button, nameEl, emptyText, multiple) {
     function update() {
@@ -73,16 +81,22 @@
       const r = await fetch("/api/health");
       const j = await r.json();
       const ok = j.simulator_reachable === true;
+      simulatorReachable = ok;
       els.statusDot.classList.toggle("ok", ok);
       els.statusDot.classList.toggle("bad", !ok);
-      els.statusText.textContent = ok
-        ? "Simulator: OK"
-        : "Simulator: " + (j.simulator_detail || "unreachable");
+      if (ok) {
+        els.statusText.textContent = "Simulator: OK";
+      } else {
+        const detail = j.simulator_detail ? " (" + j.simulator_detail + ")" : "";
+        els.statusText.textContent = "Simulator: not OK";
+      }
     } catch (e) {
+      simulatorReachable = false;
       els.statusDot.classList.remove("ok");
       els.statusDot.classList.add("bad");
-      els.statusText.textContent = "API unreachable";
+      els.statusText.textContent = "Web API unreachable";
     }
+    syncStartButton();
   }
 
   function buildChartSvg(chart) {
@@ -265,14 +279,16 @@
       if (st.status === "succeeded") {
         clearInterval(runPollTimer);
         runPollTimer = null;
-        els.btnRun.disabled = false;
+        runInProgress = false;
         els.btnExport.disabled = false;
+        syncStartButton();
       }
       if (st.status === "failed") {
         clearInterval(runPollTimer);
         runPollTimer = null;
-        els.btnRun.disabled = false;
+        runInProgress = false;
         els.runMsg.textContent = "Error: " + (st.error || "unknown");
+        syncStartButton();
       }
     } catch (e) {
       els.runMsg.textContent = "Status poll failed";
@@ -285,6 +301,9 @@
     const fps = els.filePlugins.files;
     if (!fc || !fw || !fps.length) {
       alert("Please select cluster, workload, and at least one plugins file.");
+      return;
+    }
+    if (!simulatorReachable) {
       return;
     }
     els.btnRun.disabled = true;
@@ -304,21 +323,24 @@
       const r = await fetch("/api/runs", { method: "POST", body: fd });
       if (r.status === 409) {
         els.runMsg.textContent = "A simulation is already running. Please wait.";
-        els.btnRun.disabled = false;
+        syncStartButton();
         return;
       }
       if (!r.ok) {
         const t = await r.text();
         els.runMsg.textContent = "Failed: " + t;
-        els.btnRun.disabled = false;
+        syncStartButton();
         return;
       }
+      runInProgress = true;
+      syncStartButton();
       if (runPollTimer) clearInterval(runPollTimer);
       runPollTimer = setInterval(pollRunStatus, 400);
       pollRunStatus();
     } catch (e) {
       els.runMsg.textContent = String(e);
-      els.btnRun.disabled = false;
+      runInProgress = false;
+      syncStartButton();
     }
   });
 
