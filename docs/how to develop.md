@@ -8,7 +8,7 @@
 
 ## secode step - inside the company network
 1. clone repo：git@github.com:yaochuancun/volcanoSimulator.git 
-2. upgrade plugins code in plugins folder.([url](https://codehub-g.huawei.com/cis/csd/openvessel/volcano/apollo/files?ref=master&filePath=pkg%2Fscheduler%2Fplugins))
+2. upgrade plugins code in plugins folder.([url](https://codehub-g.huawei.com/cis/csd/openvessel/volcano/apollo/files?ref=master&filePath=pkg%2Fscheduler%2Fplugins) master branch)
 3. debug and push the code to codehub.
 
 
