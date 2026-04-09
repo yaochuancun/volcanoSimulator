@@ -1,14 +1,11 @@
-"""Volcano 仿真 Web API：单用户单并发；接收 cluster/workload/多份 plugins，按算法×缩放系数跑仿真，
-落盘 CSV，向前端返回进度与图表数据，并支持 ZIP 导出。
-
-前置：Go 仿真器已启动（默认 http://127.0.0.1:8006）。
-
-运行示例（在 ``Submit_volcano_workloads`` 目录下）::
+"""Features: Single-user & single-concurrency; accepts cluster, workload, and multiple plugins, runs simulations based on algorithm × scaling factor, outputs results to CSV files, returns progress and chart data to the frontend, and supports ZIP export.
+Prerequisite: The Go-based simulator is running (default address: http://127.0.0.1:8006).
+Run Example (under the Submit_volcano_workloads directory)::
 
     pip install -r requirements.txt
     uvicorn sim_web_api:app --host 127.0.0.1 --port 8765
 
-浏览器打开 http://127.0.0.1:8765/
+Open the browser and navigate to http://127.0.0.1:8765/
 """
 
 from __future__ import annotations
@@ -86,7 +83,6 @@ def _parse_scales(s: str) -> List[float]:
 
 
 def _normalize_uploaded_text(text: str) -> str:
-    """统一换行、去 BOM，并合并连续空行，避免落盘后出现「行间多出空白行」。"""
     if not text:
         return ""
     t = text.replace("\ufeff", "")
@@ -178,7 +174,6 @@ def _run_simulation_worker(
 
             for sc in scales:
                 state.current_step_label = f"{algo_id} × scale {sc}"
-                # 进入本格：先反映「当前格」进度（避免长时间卡在 0%）
                 state.progress_percent = round(
                     100.0 * state.done_steps / total, 2
                 )
@@ -198,7 +193,6 @@ def _run_simulation_worker(
 
                 reset(sim_url, nodes_yaml, workload_yaml)
                 time.sleep(0.3)
-                # reset 完成、step 轮询可能较久，给中间进度避免条子长时间不动
                 state.progress_percent = round(
                     100.0 * (state.done_steps + 0.35) / total, 2
                 )
@@ -285,7 +279,6 @@ def api_health() -> Dict[str, Any]:
 
 @app.get("/api/status")
 def api_status() -> Dict[str, Any]:
-    """返回 ``{ run_id, state }``，与前端 ``j.state.progress_percent`` 等字段一致。"""
     with _lock:
         st = _active["state"]
         rid = _active["run_id"]
@@ -404,7 +397,6 @@ def api_export_latest() -> StreamingResponse:
 
 @app.get("/")
 def serve_index() -> FileResponse:
-    """首页与 /api 分离挂载，避免根路径 StaticFiles 与 API 路由冲突。"""
     index = STATIC_DIR / "index.html"
     if not index.is_file():
         raise HTTPException(404, "static/index.html missing")

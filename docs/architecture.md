@@ -38,9 +38,16 @@ volcanoSimulator/
 │   ├── figures/                # Legacy plotting scripts (off the main path)
 │   └── result/                 # SimRun default result root (often .gitignore)
 └── docs/
+    ├── 00-overview.md              # Plain-language introduction
+    ├── 02-python-client.md         # Python client deep dive
+    ├── 03-go-simulator.md          # Go simulator deep dive
+    ├── 04-flexnpu.md               # FlexNPU model
+    ├── 05-data-flow-and-http.md    # HTTP protocol reference
+    ├── 06-configuration-guide.md   # YAML experiment configs
+    ├── 07-code-walkthrough.md      # Key code paths
+    ├── architecture.md             # This file
     ├── requirements.md
-    ├── architecture.md       # This file
-    └── 功能清单与待办.md
+    └── how-to-develop.md           # Dev / clone workflow notes
 ```
 
 **Third-party code:** `Volcano_simulator/vendor/` holds Kubernetes, Volcano APIs, etc. Application logic lives under `pkg/` and `cmd/sim`.
@@ -343,8 +350,10 @@ sequenceDiagram
 ## 9. Related documents
 
 - [**requirements.md**](./requirements.md): scope, I/O contracts, terminology.  
-- [**功能清单与待办.md**](./功能清单与待办.md): implemented vs optional checklist.  
+- [**00-overview.md**](./00-overview.md): plain-language overview and reading order.  
+- [**02-python-client.md**](./02-python-client.md) … [**07-code-walkthrough.md**](./07-code-walkthrough.md): tutorial series (Python, Go, FlexNPU, HTTP, configs, code).  
 - [**README.md**](../README.md): build/run, Web UI, directory overview.  
 - [**Submit_volcano_workloads/requirements.txt**](../Submit_volcano_workloads/requirements.txt): Python packages and rationale.  
 - [**Submit_volcano_workloads/input_config/README.md**](../Submit_volcano_workloads/input_config/README.md): input file roles.  
-- [**10-Web界面与后端编排架构讨论.md**](./10-Web界面与后端编排架构讨论.md): product-level Web discussion (draft; implementation is `sim_web_api` + `static/`).
+- [**how-to-develop.md**](./how-to-develop.md): clone and dev workflow notes.  
+- **Web UI product notes (Chinese draft, if present in repo):** `10-Web界面与后端编排架构讨论.md` — implementation is **`sim_web_api.py`** + **`static/`**; see **§5 Web UI architecture** in this file.

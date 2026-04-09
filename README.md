@@ -2,7 +2,7 @@
 
 This repository contains a **Volcano scheduling simulator (Go)** and a **Python workload client**: describe clusters, jobs, and scheduler plugins in YAML, drive the simulation over HTTP, and write task summaries, FlexNPU utilization, and standard CSV reports to disk. It also ships a **browser-based single-page Web UI** for batch runs across **multiple scheduler configs × multiple workload scale factors** and ZIP export—without using the command line for uploads.
 
-License and third-party notes: root [**LICENSE**](LICENSE), [**LICENSE-NOTES.md**](LICENSE-NOTES.md). Input layout details: [**Submit_volcano_workloads/input_config/README.md**](Submit_volcano_workloads/input_config/README.md). **Architecture (English):** [**docs/architecture.md**](docs/architecture.md). **Per-package dependency notes:** [**Submit_volcano_workloads/requirements.txt**](Submit_volcano_workloads/requirements.txt).
+License and third-party notes: root [**LICENSE**](LICENSE), [**LICENSE-NOTES.md**](LICENSE-NOTES.md). Input layout details: [**Submit_volcano_workloads/input_config/README.md**](Submit_volcano_workloads/input_config/README.md). **Architecture (English):** [**docs/architecture.md**](docs/architecture.md). **Tutorial series (overview → Python → Go → …):** [**docs/00-overview.md**](docs/00-overview.md). **Per-package dependency notes:** [**Submit_volcano_workloads/requirements.txt**](Submit_volcano_workloads/requirements.txt).
 
 ---
 

@@ -144,5 +144,5 @@ For one valid snapshot, files are written **flat** under the given directory (e.
 - Root [**README.md**](../README.md): quick start and directory overview.  
 - [**Submit_volcano_workloads/input_config/README.md**](../Submit_volcano_workloads/input_config/README.md): input file roles.  
 - [**architecture.md**](./architecture.md): modules, HTTP and main loop, data flow.  
-- [**功能清单与待办.md**](./功能清单与待办.md): implemented vs optional items.  
+- [**00-overview.md**](./00-overview.md): plain-language overview and doc map.  
 - **This document:** requirements and implemented-feature summary; keep it in sync when APIs or CSV columns change.

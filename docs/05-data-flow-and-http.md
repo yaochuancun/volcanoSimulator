@@ -1,15 +1,15 @@
-# 05-数据流与交互：HTTP协议详解
+# 05 Data flow and HTTP: detailed protocol reference
 
-> 本文档详细介绍 Python 客户端和 Go 仿真器之间的 HTTP 通信协议，包括接口定义、数据格式和交互流程。
+> This document describes the HTTP communication protocol between the Python client and the Go simulator in detail, including API definitions, data formats, and interaction flows.
 
 ---
 
-## 一、通信架构
+## 1. Communication architecture
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    Python 客户端                             │
-│                 (localhost: 任意端口)                          │
+│                    Python client                             │
+│                 (localhost: any port)                        │
 │                                                              │
 │  ┌─────────────┐      ┌─────────────────────┐               │
 │  │  JsonHttp   │──────│    requests.post    │               │
@@ -21,7 +21,7 @@
                            │ Content-Type: application/json
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                     Go 仿真器                                │
+│                     Go simulator                             │
 │                  (localhost:8006)                            │
 │                                                              │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -36,24 +36,24 @@
 
 ---
 
-## 二、接口一览
+## 2. API overview
 
-| 接口 | 方法 | 功能 | 请求体 | 响应 |
-|------|------|------|--------|------|
-| `/reset` | POST | 初始化仿真 | JSON | JSON / "0" |
-| `/step` | POST | 推进调度 | JSON | "1" |
-| `/stepResult` | POST/GET | 获取结果 | JSON(可选) | JSON / "0" |
-| `/stepResultAnyway` | GET | 强制获取结果 | - | JSON |
+| Endpoint | Method | Purpose | Request body | Response |
+|----------|--------|---------|--------------|----------|
+| `/reset` | POST | Initialize simulation | JSON | JSON / `"0"` |
+| `/step` | POST | Advance scheduling | JSON | `"1"` |
+| `/stepResult` | POST/GET | Fetch result | JSON (optional) | JSON / `"0"` |
+| `/stepResultAnyway` | GET | Force-fetch result | - | JSON |
 
 ---
 
-## 三、详细接口定义
+## 3. Detailed API definitions
 
-### 3.1 POST /reset - 初始化仿真
+### 3.1 POST /reset — initialize simulation
 
-**功能：** 重置仿真环境，加载新的集群和任务配置
+**Purpose:** Reset the simulation environment and load new cluster and workload configuration.
 
-**请求：**
+**Request:**
 ```http
 POST /reset HTTP/1.1
 Host: localhost:8006
@@ -66,15 +66,15 @@ Content-Type: application/json
 }
 ```
 
-**字段说明：**
+**Field reference:**
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `period` | string | 是 | 调度配置加载周期（秒），-1 表示只加载一次 |
-| `nodes` | string | 是 | 集群配置的 YAML 字符串 |
-| `workload` | string | 是 | 负载配置的 YAML 字符串 |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `period` | string | Yes | Scheduler config load period (seconds); `-1` means load once only |
+| `nodes` | string | Yes | Cluster configuration as a YAML string |
+| `workload` | string | Yes | Workload configuration as a YAML string |
 
-**响应（成功）：**
+**Response (success):**
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -91,7 +91,7 @@ Content-Type: application/json
 }
 ```
 
-**响应（失败 - 有任务在运行）：**
+**Response (failure — jobs still running):**
 ```http
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -99,17 +99,18 @@ Content-Type: text/plain
 0
 ```
 
-**注意事项：**
-- 如果仿真器中有任务未完成，返回 "0" 表示拒绝重置
-- 需要先等待当前仿真完成，或重启仿真器进程
+**Notes:**
+
+- If jobs are still running in the simulator, returning `"0"` means reset was refused.
+- Wait for the current simulation to finish, or restart the simulator process.
 
 ---
 
-### 3.2 POST /step - 推进调度
+### 3.2 POST /step — advance scheduling
 
-**功能：** 发送调度配置，触发一轮调度
+**Purpose:** Send scheduler configuration and trigger one scheduling round.
 
-**请求：**
+**Request:**
 ```http
 POST /step HTTP/1.1
 Host: localhost:8006
@@ -120,13 +121,13 @@ Content-Type: application/json
 }
 ```
 
-**字段说明：**
+**Field reference:**
 
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `conf` | string | 是 | 调度器配置的 YAML 字符串 |
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `conf` | string | Yes | Scheduler configuration as a YAML string |
 
-**调度配置格式：**
+**Scheduler configuration format:**
 ```yaml
 actions: "enqueue, allocate, backfill"
 tiers:
@@ -139,7 +140,7 @@ tiers:
       - name: binpack
 ```
 
-**响应：**
+**Response:**
 ```http
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -147,23 +148,24 @@ Content-Type: text/plain
 1
 ```
 
-**注意事项：**
-- 返回 "1" 只表示配置已接收，不表示调度已完成
-- 调度是异步执行的，需要轮询 `/stepResult` 获取结果
+**Notes:**
+
+- `"1"` only means the configuration was accepted, not that scheduling has finished.
+- Scheduling runs asynchronously; poll `/stepResult` for the outcome.
 
 ---
 
-### 3.3 GET/POST /stepResult - 获取结果
+### 3.3 GET/POST /stepResult — fetch result
 
-**功能：** 获取当前仿真状态
+**Purpose:** Retrieve the current simulation state.
 
-**请求（GET）：**
+**Request (GET):**
 ```http
 GET /stepResult HTTP/1.1
 Host: localhost:8006
 ```
 
-**请求（POST，带空 JSON）：**
+**Request (POST with empty JSON):**
 ```http
 POST /stepResult HTTP/1.1
 Host: localhost:8006
@@ -174,7 +176,7 @@ Content-Type: application/json
 }
 ```
 
-**响应（调度完成）：**
+**Response (scheduling complete):**
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -209,7 +211,7 @@ Content-Type: application/json
 }
 ```
 
-**响应（调度中）：**
+**Response (still scheduling):**
 ```http
 HTTP/1.1 200 OK
 Content-Type: text/plain
@@ -217,31 +219,31 @@ Content-Type: text/plain
 0
 ```
 
-**关键字段说明：**
+**Key fields:**
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `NotCompletion` | bool | 是否还有任务未完成 |
-| `Nodes` | object | 节点状态，键是节点名 |
-| `Jobs` | object | 任务状态，键是 "namespace/name" |
-| `Clock` | string | 当前仿真时间 |
-| `Done` | bool | 是否全部完成（NotCompletion 的取反） |
-| `V1Nodes` | array | 精简的节点列表 |
-| `Pods` | array | Pod 列表 |
+| Field | Type | Description |
+|-------|------|-------------|
+| `NotCompletion` | bool | Whether any tasks are still incomplete |
+| `Nodes` | object | Node state; keys are node names |
+| `Jobs` | object | Job state; keys are `"namespace/name"` |
+| `Clock` | string | Current simulation time |
+| `Done` | bool | Whether everything is complete (inverse of `NotCompletion` in intent) |
+| `V1Nodes` | array | Condensed node list |
+| `Pods` | array | Pod list |
 
 ---
 
-### 3.4 GET /stepResultAnyway - 强制获取结果
+### 3.4 GET /stepResultAnyway — force-fetch result
 
-**功能：** 无论调度是否完成，都返回当前状态
+**Purpose:** Return the current state regardless of whether scheduling has finished.
 
-**请求：**
+**Request:**
 ```http
 GET /stepResultAnyway HTTP/1.1
 Host: localhost:8006
 ```
 
-**响应：**
+**Response:**
 ```http
 HTTP/1.1 200 OK
 Content-Type: application/json
@@ -253,66 +255,67 @@ Content-Type: application/json
 }
 ```
 
-**与 `/stepResult` 的区别：**
-- `/stepResult`：调度中返回 "0"，完成后返回 JSON
-- `/stepResultAnyway`：始终返回 JSON（字段可能较少）
+**Difference from `/stepResult`:**
+
+- `/stepResult`: returns `"0"` while scheduling; JSON after completion.
+- `/stepResultAnyway`: always returns JSON (fields may be fewer).
 
 ---
 
-## 四、完整交互流程
+## 4. End-to-end interaction flow
 
-### 4.1 时序图
+### 4.1 Sequence diagram
 
 ```
-Python 客户端                Go 仿真器
+Python client                Go simulator
     │                            │
     │── POST /reset ────────────→│
     │   {nodes, workload}        │
-    │                            │  初始化 ClusterInfo
-    │                            │  加载 Nodes 和 Jobs
-    │←─── JSON 确认 ─────────────│
+    │                            │  Initialize ClusterInfo
+    │                            │  Load Nodes and Jobs
+    │←─── JSON ack ─────────────│
     │                            │
     │── POST /step ─────────────→│
     │   {scheduler_conf}         │
-    │                            │  解析调度配置
+    │                            │  Parse scheduler config
     │                            │  loadNewSchedulerConf = true
     │←─── "1" ──────────────────│
     │                            │
-    │  (Go 主循环执行调度)         │
+    │  (Go main loop runs scheduling)
     │                            │
     │── GET /stepResult ────────→│
-    │                            │  调度完成？
-    │←─── "0" ──────────────────│  否，返回 "0"
+    │                            │  Scheduling done?
+    │←─── "0" ──────────────────│  No → return "0"
     │                            │
-    │  (等待 200ms)               │
+    │  (wait 200ms)               │
     │                            │
     │── GET /stepResult ────────→│
-    │                            │  调度完成？
-    │←─── JSON 结果 ─────────────│  是，返回 JSON
+    │                            │  Scheduling done?
+    │←─── JSON result ──────────│  Yes → return JSON
     │                            │
-    │  (Python 生成报表)           │
+    │  (Python builds reports)    │
     │                            │
 ```
 
-### 4.2 状态机
+### 4.2 State machine
 
 ```
 ┌─────────────┐     reset      ┌─────────────┐
-│   空闲       │───────────────→│  初始化中    │
-│  (Idle)     │                │ (Initializing)
+│   Idle      │───────────────→│ Initializing│
+│             │                │             │
 └─────────────┘                └──────┬──────┘
      ▲                                │
-     │                                │ 完成
+     │                                │ complete
      │                                ▼
      │                          ┌─────────────┐
-     │     ┌────────────────────│   就绪      │
-     │     │   stepResult JSON  │  (Ready)    │
+     │     ┌────────────────────│   Ready     │
+     │     │   stepResult JSON  │             │
      │     │                    └──────┬──────┘
      │     │                           │ step
      │     │                           ▼
      │     │                    ┌─────────────┐
-     │     │    stepResult "0"  │  调度中      │
-     │     └────────────────────│ (Scheduling)│
+     │     │    stepResult "0"  │ Scheduling  │
+     │     └────────────────────│             │
      │                          └──────┬──────┘
      │                                 │
      └─────────────────────────────────┘
@@ -320,9 +323,9 @@ Python 客户端                Go 仿真器
 
 ---
 
-## 五、数据结构详解
+## 5. Data structures in detail
 
-### 5.1 ClusterInfo 序列化格式
+### 5.1 ClusterInfo serialization format
 
 ```json
 {
@@ -354,11 +357,12 @@ Python 客户端                Go 仿真器
 }
 ```
 
-**注意：**
-- 资源值是 **MilliValue** 格式（如 100% = 100000）
-- Python 端需要除以 1000 转换为实际值
+**Note:**
 
-### 5.2 JobInfo 序列化格式
+- Resource values use **MilliValue** (e.g. 100% = 100000).
+- On the Python side, divide by 1000 to get practical values.
+
+### 5.2 JobInfo serialization format
 
 ```json
 {
@@ -406,19 +410,19 @@ Python 客户端                Go 仿真器
 
 ---
 
-## 六、错误处理
+## 6. Error handling
 
-### 6.1 常见错误
+### 6.1 Common issues
 
-| 错误 | 原因 | 解决 |
-|------|------|------|
-| 连接 refused | 仿真器未启动 | 启动 Go 仿真器 |
-| 返回 "0" | 有任务在运行 | 等待完成或重启仿真器 |
-| JSON 解析失败 | 返回了 "0" | 检查 `str(result) == '0'` |
-| 空 Nodes | 集群未正确加载 | 检查 cluster YAML |
-| 空 Jobs | 负载未正确加载 | 检查 workload YAML |
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Connection refused | Simulator not running | Start the Go simulator |
+| Returns `"0"` | Jobs still running | Wait for completion or restart simulator |
+| JSON parse error | Response was `"0"` | Check `str(result) == '0'` |
+| Empty `Nodes` | Cluster not loaded correctly | Check cluster YAML |
+| Empty `Jobs` | Workload not loaded correctly | Check workload YAML |
 
-### 6.2 重试策略
+### 6.2 Retry strategy
 
 ```python
 class JsonHttpClient:
@@ -431,17 +435,17 @@ class JsonHttpClient:
             except requests.RequestException:
                 if attempt == max_retries - 1:
                     raise
-                time.sleep(0.1)  # 退避等待
+                time.sleep(0.1)  # backoff
 ```
 
 ---
 
-## 七、调试技巧
+## 7. Debugging tips
 
-### 7.1 用 curl 测试
+### 7.1 Testing with curl
 
 ```bash
-# 测试 reset
+# Test reset
 curl -X POST http://localhost:8006/reset \
   -H "Content-Type: application/json" \
   -d '{
@@ -450,18 +454,19 @@ curl -X POST http://localhost:8006/reset \
     "workload": "jobs: []"
   }'
 
-# 测试 step
+# Test step
 curl -X POST http://localhost:8006/step \
   -H "Content-Type: application/json" \
   -d '{"conf": "actions: enqueue, allocate\ntiers: []"}'
 
-# 获取结果
+# Fetch result
 curl http://localhost:8006/stepResult
 ```
 
-### 7.2 日志查看
+### 7.2 Logs
 
-Go 仿真器会输出日志到控制台：
+The Go simulator prints logs to the console:
+
 ```
 reset...
 node-1 :
@@ -474,17 +479,17 @@ actions: enqueue, allocate, backfill
 ...
 ```
 
-### 7.3 数据验证
+### 7.3 Data validation
 
 ```python
-# 验证 Nodes 结构
+# Validate Nodes structure
 assert "Nodes" in resultdata
 for node_name, node_info in resultdata["Nodes"].items():
     assert "Allocatable" in node_info
     assert "Used" in node_info
     assert "Tasks" in node_info
 
-# 验证 Jobs 结构
+# Validate Jobs structure
 assert "Jobs" in resultdata
 for job_id, job_info in resultdata["Jobs"].items():
     assert "Tasks" in job_info
@@ -495,20 +500,22 @@ for job_id, job_info in resultdata["Jobs"].items():
 
 ---
 
-## 八、总结
+## 8. Summary
 
-**HTTP 接口设计原则：**
-1. **简单**：4 个接口覆盖全部功能
-2. **异步**：step 和 stepResult 分离，支持长耗时调度
-3. **容错**：失败返回 "0" 而不是报错
-4. **完整**：返回完整的集群状态，便于分析
+**HTTP API design principles:**
 
-**关键要点：**
-- `/reset` 初始化，返回 JSON 或 "0"
-- `/step` 触发调度，返回 "1"
-- `/stepResult` 轮询结果，返回 JSON 或 "0"
-- 资源值是 MilliValue，需要除以 1000
+1. **Simple:** Four endpoints cover all behavior.
+2. **Asynchronous:** `step` and `stepResult` are separate to support long-running scheduling.
+3. **Resilient:** Failures return `"0"` instead of hard errors.
+4. **Complete:** Full cluster state is returned for analysis.
+
+**Key takeaways:**
+
+- `/reset` initializes; response is JSON or `"0"`.
+- `/step` triggers scheduling; response is `"1"`.
+- `/stepResult` polls for results; response is JSON or `"0"`.
+- Resource values are MilliValue; divide by 1000.
 
 ---
 
-准备好学习如何编写配置文件了吗？请继续阅读 `06-配置文件指南.md`！
+Ready to write configuration files? Continue with [`06-configuration-guide.md`](06-configuration-guide.md).

@@ -1,68 +1,69 @@
-# 06-配置文件指南：如何编写实验配置
+# 06 — Configuration guide: how to write experiment configs
 
-> 本文档详细介绍如何编写集群、负载和插件配置文件，以及常用的配置模式。
+> This document explains how to write cluster, workload, and plugin configuration files, plus common configuration patterns.
 
 ---
 
-## 一、配置文件概览
+## 1. Configuration files overview
 
 ```
 input_config/
-├── cluster/              # 集群配置：定义你的"虚拟数据中心"
+├── cluster/              # Cluster config: defines your "virtual datacenter"
 │   ├── cluster.yaml
 │   └── cluster_1.yaml
-├── workload/             # 负载配置：定义你要跑什么任务
+├── workload/             # Workload config: defines what jobs to run
 │   ├── workload.yaml
 │   └── workload_1.yaml
-└── plugins/              # 插件配置：定义用什么调度策略
+└── plugins/              # Plugin config: defines scheduling policy
     ├── plugins.yaml
     └── plugins_mvp.yaml
 ```
 
 ---
 
-## 二、集群配置（cluster/*.yaml）
+## 2. Cluster configuration (`cluster/*.yaml`)
 
-### 2.1 基础结构
+### 2.1 Basic structure
 
 ```yaml
-# 集群配置定义你的"虚拟数据中心"有哪些机器
+# Cluster config defines machines in your "virtual datacenter"
 nodes:
-  - name: node-1                    # 机器名字（唯一）
-    labels:                         # 标签（用于调度筛选）
+  - name: node-1                    # Machine name (unique)
+    labels:                         # Labels (for scheduling filters)
       accelerator: npu
       rack: rack-a
-    annotations:                    # 注解（存额外信息）
-      # 这行最关键：定义有几张 GPU 卡，每张多少算力和显存
+    annotations:                    # Annotations (extra metadata)
+      # Most important: how many GPU cards, compute % and memory per card
       volcano.sh/flexnpu-core.percentage-list: "[100, 100, 100, 100]"
       volcano.sh/flexnpu-memory.128mi-list: "[64, 64, 64, 64]"
     spec:
-      unschedulable: false          # 是否可调度（维护模式设为 true）
+      unschedulable: false          # Schedulable? (set true for maintenance)
     status:
-      capacity:                     # 总容量
+      capacity:                     # Total capacity
         cpu: "32"
         memory: "128Gi"
-      allocatable:                  # 可用容量（减去系统预留）
+      allocatable:                  # Allocatable (minus system reserve)
         cpu: "28"
         memory: "120Gi"
 ```
 
-### 2.2 FlexNPU 注解详解
+### 2.2 FlexNPU annotations in detail
 
 **`volcano.sh/flexnpu-core.percentage-list`**
-- 格式：JSON 数组
-- 含义：每张 GPU 卡的算力百分比
-- 示例：`"[100, 100, 100, 100]"` = 4 张卡，每张 100% 算力
+- Format: JSON array
+- Meaning: compute percentage per GPU card
+- Example: `"[100, 100, 100, 100]"` = 4 cards, 100% compute each
 
 **`volcano.sh/flexnpu-memory.128mi-list`**
-- 格式：JSON 数组
-- 含义：每张 GPU 卡的显存（单位：128Mi）
-- 示例：`"[64, 64, 64, 64]"` = 每张卡 64×128Mi = 8GB 显存
+- Format: JSON array
+- Meaning: GPU memory per card in units of 128Mi
+- Example: `"[64, 64, 64, 64]"` = 64×128Mi = 8GB per card
 
-**多节点示例：**
+**Multi-node example:**
+
 ```yaml
 nodes:
-  # 高性能节点：8 张 A100，每张 100% 算力、80GB 显存
+  # High-performance node: 8× A100, 100% compute each, 80GB VRAM each
   - name: gpu-a100-x8
     labels:
       accelerator: npu
@@ -75,7 +76,7 @@ nodes:
         cpu: "128"
         memory: "1024Gi"
 
-  # 中性能节点：4 张 T4，每张 100% 算力、16GB 显存
+  # Mid-tier node: 4× T4, 100% compute each, 16GB VRAM each
   - name: gpu-t4-x4
     labels:
       accelerator: npu
@@ -88,7 +89,7 @@ nodes:
         cpu: "32"
         memory: "128Gi"
 
-  # CPU 节点：无 GPU
+  # CPU-only node: no GPU
   - name: cpu-only
     labels:
       accelerator: none
@@ -98,18 +99,19 @@ nodes:
         memory: "256Gi"
 ```
 
-### 2.3 节点标签的用途
+### 2.3 Using node labels
 
-**用于调度筛选：**
+**For scheduling filters:**
+
 ```yaml
-# 集群配置
+# Cluster config
 nodes:
   - name: node-1
     labels:
-      accelerator: npu      # 有 GPU
-      zone: zone-a          # 可用区
+      accelerator: npu      # Has GPU
+      zone: zone-a            # Zone
 
-# 负载配置
+# Workload config
 jobs:
   - spec:
       affinity:
@@ -124,32 +126,32 @@ jobs:
 
 ---
 
-## 三、负载配置（workload/*.yaml）
+## 3. Workload configuration (`workload/*.yaml`)
 
-### 3.1 基础结构
+### 3.1 Basic structure
 
 ```yaml
-# 负载配置定义你要跑什么任务
+# Workload config defines what jobs to run
 spec:
-  npuGranularityPercent: 10       # 资源粒度（可选，默认 0）
+  npuGranularityPercent: 10       # Resource granularity (optional, default 0)
 
 jobs:
   - metadata:
       name: training-job-1
       namespace: default
       labels:
-        sub-time: "0"             # 提交时间（秒），0 表示立即提交
+        sub-time: "0"             # Submit time (seconds); 0 = submit immediately
         queue: default
     spec:
-      minAvailable: 4             # Gang 调度：至少 4 个 Pod 才能启动
+      minAvailable: 4             # Gang: need at least 4 Pods to start
       schedulerName: volcano
       tasks:
         - name: train
-          replicas: 4             # 启动 4 个 Pod
+          replicas: 4             # Start 4 Pods
           template:
             metadata:
               annotations:
-                volcano.sh/flexnpu-num: "2"  # 每个 Pod 用 2 张卡
+                volcano.sh/flexnpu-num: "2"  # 2 cards per Pod
             spec:
               containers:
                 - name: train
@@ -158,43 +160,43 @@ jobs:
                     requests:
                       cpu: "4"
                       memory: "16Gi"
-                      volcano.sh/flexnpu-core.percentage: "35"   # 每张卡 35% 算力
-                      volcano.sh/flexnpu-memory.128mi: "64"      # 每张卡 8GB 显存
+                      volcano.sh/flexnpu-core.percentage: "35"   # 35% compute per card
+                      volcano.sh/flexnpu-memory.128mi: "64"      # 8GB VRAM per card
                     limits:
                       cpu: "8"
                       memory: "32Gi"
 ```
 
-### 3.2 关键字段详解
+### 3.2 Key fields
 
 **`spec.npuGranularityPercent`**
-- 作用：设置 GPU 算力分配的最小粒度
-- 示例：`10` 表示只能分配 10%、20%、30%... 不能分配 35%
-- 如果任务请求 35%，会向上取整为 40%
+- Purpose: minimum step for GPU compute allocation
+- Example: `10` means only 10%, 20%, 30%… not 35%
+- If a job requests 35%, it rounds up to 40%
 
 **`metadata.labels.sub-time`**
-- 作用：设置任务的提交时间（相对于仿真开始）
-- 单位：秒
-- 示例：`"0"` 表示第 0 秒提交，`"60"` 表示第 60 秒提交
+- Purpose: job submit time relative to simulation start
+- Unit: seconds
+- Example: `"0"` = submit at t=0, `"60"` = submit at t=60
 
 **`spec.minAvailable`**
-- 作用：Gang 调度参数
-- 含义：至少要有这么多 Pod 才能启动
-- 示例：`4` 表示 4 个 Pod 要么一起启动，要么都不启动
+- Purpose: Gang scheduling parameter
+- Meaning: at least this many Pods must be schedulable together
+- Example: `4` means all four Pods start together or none do
 
 **`volcano.sh/flexnpu-num`**
-- 作用：每个 Pod 用几张 GPU 卡
-- 示例：`"2"` 表示这个 Pod 需要 2 张卡
-- 总资源需求 = num × per-card-request
+- Purpose: how many GPU cards each Pod needs
+- Example: `"2"` means this Pod needs two cards
+- Total demand = num × per-card request
 
-### 3.3 多任务场景
+### 3.3 Multi-job scenario
 
 ```yaml
 spec:
   npuGranularityPercent: 10
 
 jobs:
-  # 任务 1：大模型训练（8 卡并行，立即提交）
+  # Job 1: large model training (8-way, submit immediately)
   - metadata:
       name: llm-training
       labels:
@@ -212,10 +214,10 @@ jobs:
               containers:
                 - resources:
                     requests:
-                      volcano.sh/flexnpu-core.percentage: "100"  # 独占整卡
-                      volcano.sh/flexnpu-memory.128mi: "640"     # 80GB 显存
+                      volcano.sh/flexnpu-core.percentage: "100"  # exclusive full card
+                      volcano.sh/flexnpu-memory.128mi: "640"     # 80GB VRAM
 
-  # 任务 2：小模型训练（2 卡，30 秒后提交）
+  # Job 2: small model (2 cards, submit after 30s)
   - metadata:
       name: small-training
       labels:
@@ -236,7 +238,7 @@ jobs:
                       volcano.sh/flexnpu-core.percentage: "50"
                       volcano.sh/flexnpu-memory.128mi: "128"
 
-  # 任务 3：推理服务（1 卡，60 秒后提交）
+  # Job 3: inference (1 card, submit after 60s)
   - metadata:
       name: inference
       labels:
@@ -257,15 +259,15 @@ jobs:
                       volcano.sh/flexnpu-memory.128mi: "32"
 ```
 
-### 3.4 不同优先级
+### 3.4 Different priorities
 
 ```yaml
 jobs:
-  # 高优先级任务
+  # High-priority job
   - metadata:
       name: urgent-job
     spec:
-      priorityClassName: high-priority    # 引用 PriorityClass
+      priorityClassName: high-priority    # references PriorityClass
       tasks:
         - replicas: 2
           template:
@@ -275,7 +277,7 @@ jobs:
                     requests:
                       volcano.sh/flexnpu-core.percentage: "60"
 
-  # 低优先级任务（可被抢占）
+  # Low-priority job (may be preempted)
   - metadata:
       name: background-job
     spec:
@@ -292,99 +294,99 @@ jobs:
 
 ---
 
-## 四、插件配置（plugins/*.yaml）
+## 4. Plugin configuration (`plugins/*.yaml`)
 
-### 4.1 基础结构
+### 4.1 Basic structure
 
 ```yaml
-# 插件配置定义用什么调度策略
+# Plugin config defines scheduling policy
 scheduler:
-  actions: "enqueue, allocate, backfill"  # 调度动作顺序
-  
-  tiers:
-    # 第一层：必需插件（硬性约束）
-    - plugins:
-        - name: gang          # Gang 调度
-        - name: drf           # 主导资源公平
-        - name: proportion    # 队列比例
-    
-    # 第二层：优化插件（软性约束）
-    - plugins:
-        - name: nodeorder     # 节点选择
-        - name: binpack       # 紧凑打包
+  actions: "enqueue, allocate, backfill"  # Scheduling action order
 
-# 输出配置
+  tiers:
+    # Tier 1: required plugins (hard constraints)
+    - plugins:
+        - name: gang          # Gang scheduling
+        - name: drf           # dominant resource fairness
+        - name: proportion    # queue proportions
+
+    # Tier 2: optimization plugins (soft constraints)
+    - plugins:
+        - name: nodeorder     # node selection
+        - name: binpack       # tight packing
+
+# Output settings
 output:
-  outDir: "./result/{date}"   # 结果输出目录，{date} 会被替换为时间戳
+  outDir: "./result/{date}"   # Result directory; {date} is replaced with a timestamp
 ```
 
-### 4.2 Actions（调度动作）
+### 4.2 Actions (scheduling actions)
 
-**执行顺序很重要！**
+**Order matters.**
 
 ```yaml
-# 推荐配置 1：标准批处理
+# Recommended 1: standard batch
 actions: "enqueue, allocate, backfill"
-# enqueue:   将符合条件的 Job 加入队列
-# allocate:  为任务分配节点
-# backfill:  回填小任务到空闲资源
+# enqueue:   enqueue eligible Jobs
+# allocate:  assign nodes to work
+# backfill:  fill gaps with small jobs
 
-# 推荐配置 2：支持抢占
+# Recommended 2: with preemption
 actions: "enqueue, allocate, preempt, backfill"
-# preempt:   抢占低优先级任务的资源
+# preempt:   preempt lower-priority work
 
-# 推荐配置 3：预留资源
+# Recommended 3: with reservation
 actions: "enqueue, reserve, allocate, backfill"
-# reserve:   为重要任务预留资源
+# reserve:   reserve capacity for important jobs
 ```
 
-### 4.3 Plugins（调度插件）
+### 4.3 Plugins (scheduling plugins)
 
-**第一层：队列和资源管理**
+**Tier 1: queues and resource management**
 
 ```yaml
 tiers:
   - plugins:
-      # Gang 调度：确保一组任务同时启动
+      # Gang: start a group of tasks together
       - name: gang
         arguments:
-          minJobExecutionTime: 10m    # 最小执行时间，防止频繁抢占
-          
-      # DRF：主导资源公平分配
+          minJobExecutionTime: 10m    # min runtime to reduce thrashing from preemption
+
+      # DRF: dominant resource fairness
       - name: drf
         arguments:
-          preselectEnable: true       # 预筛选
-          
-      # Proportion：队列资源比例
+          preselectEnable: true       # preselection
+
+      # Proportion: per-queue resource share
       - name: proportion
         arguments:
-          decayFactor: 0.9            # 衰减因子
+          decayFactor: 0.9            # decay factor
 ```
 
-**第二层：节点选择和优化**
+**Tier 2: node choice and optimization**
 
 ```yaml
     - plugins:
-        # NodeOrder：节点选择策略
+        # NodeOrder: node scoring
         - name: nodeorder
           arguments:
-            leastResourceWeight: 100   # 最少资源权重（spread）
-            mostResourceWeight: 0      # 最多资源权重（binpack）
-        
-        # Binpack：紧凑打包（提高利用率）
+            leastResourceWeight: 100   # spread across nodes
+            mostResourceWeight: 0      # binpack bias
+
+        # Binpack: tight packing (higher utilization)
         - name: binpack
           arguments:
-            weight: 10                 # 权重
-            
-        # Predicates：硬性约束检查
+            weight: 10                 # weight
+
+        # Predicates: hard constraint checks
         - name: predicates
           arguments:
-            predicate.GPUSharingEnable: true   # 启用 GPU 共享
+            predicate.GPUSharingEnable: true   # enable GPU sharing
 ```
 
-### 4.4 常见配置模式
+### 4.4 Common patterns
 
-**模式 1：最大化利用率（Binpack）**
+**Pattern 1: maximize utilization (binpack)**
 
 ```yaml
 scheduler:
@@ -394,12 +396,12 @@ scheduler:
         - name: gang
         - name: drf
     - plugins:
-        - name: binpack           # 紧凑打包
+        - name: binpack           # tight packing
           arguments:
             weight: 100
 ```
 
-**模式 2：负载均衡（Spread）**
+**Pattern 2: load spread**
 
 ```yaml
 scheduler:
@@ -411,11 +413,11 @@ scheduler:
     - plugins:
         - name: nodeorder
           arguments:
-            leastResourceWeight: 100   # 分散到不同节点
+            leastResourceWeight: 100   # spread across nodes
             mostResourceWeight: 0
 ```
 
-**模式 3：支持抢占**
+**Pattern 3: with preemption**
 
 ```yaml
 scheduler:
@@ -423,14 +425,14 @@ scheduler:
   tiers:
     - plugins:
         - name: gang
-        - name: priority        # 优先级
+        - name: priority        # priority
         - name: drf
     - plugins:
-        - name: preempt         # 抢占
+        - name: preempt         # preemption
         - name: nodeorder
 ```
 
-**模式 4：队列隔离**
+**Pattern 4: queue isolation**
 
 ```yaml
 scheduler:
@@ -438,7 +440,7 @@ scheduler:
   tiers:
     - plugins:
         - name: gang
-        - name: proportion      # 队列比例控制
+        - name: proportion      # queue share control
           arguments:
             queue.capabilities: "[gpu]"
     - plugins:
@@ -447,9 +449,9 @@ scheduler:
 
 ---
 
-## 五、完整配置示例
+## 5. Full examples
 
-### 5.1 小规模实验
+### 5.1 Small experiment
 
 ```yaml
 # cluster_small.yaml
@@ -538,12 +540,12 @@ output:
   outDir: "./result/small_{date}"
 ```
 
-### 5.2 大规模实验
+### 5.2 Large experiment
 
 ```yaml
 # cluster_large.yaml
 nodes:
-  # 8 卡节点 × 10
+  # 8-GPU nodes × 10
   - name: gpu-node-{1..10}
     labels:
       accelerator: npu
@@ -562,7 +564,7 @@ spec:
   npuGranularityPercent: 5
 
 jobs:
-  # 大作业 × 5
+  # Large jobs × 5
   - metadata:
       name: large-job-{1..5}
       labels:
@@ -582,7 +584,7 @@ jobs:
                     requests:
                       volcano.sh/flexnpu-core.percentage: "100"
 
-  # 小作业 × 20
+  # Small jobs × 20
   - metadata:
       name: small-job-{1..20}
       labels:
@@ -605,93 +607,94 @@ jobs:
 
 ---
 
-## 六、配置验证清单
+## 6. Configuration checklist
 
-### 6.1 集群配置检查
+### 6.1 Cluster
 
-- [ ] `nodes` 列表不为空
-- [ ] 每个节点有 `name`
-- [ ] `flexnpu-core.percentage-list` 格式正确（JSON 数组）
-- [ ] `flexnpu-memory.128mi-list` 格式正确（JSON 数组）
-- [ ] 两个列表长度一致（每张卡都有算力和显存）
-- [ ] `capacity` 和 `allocatable` 合理
+- [ ] `nodes` is non-empty
+- [ ] Every node has `name`
+- [ ] `flexnpu-core.percentage-list` is valid (JSON array)
+- [ ] `flexnpu-memory.128mi-list` is valid (JSON array)
+- [ ] Both lists have the same length (compute + memory per card)
+- [ ] `capacity` and `allocatable` are sensible
 
-### 6.2 负载配置检查
+### 6.2 Workload
 
-- [ ] `jobs` 列表不为空
-- [ ] 每个 Job 有 `metadata.name`
-- [ ] `sub-time` 是数字字符串（如 `"0"`）
-- [ ] `tasks[0].replicas` 是正整数
-- [ ] `flexnpu-core.percentage` 在 0-100 之间
-- [ ] `flexnpu-num` 是正整数
-- [ ] 资源请求 ≤ 节点总容量
+- [ ] `jobs` is non-empty
+- [ ] Each Job has `metadata.name`
+- [ ] `sub-time` is a numeric string (e.g. `"0"`)
+- [ ] `tasks[0].replicas` is a positive integer
+- [ ] `flexnpu-core.percentage` is between 0 and 100
+- [ ] `flexnpu-num` is a positive integer
+- [ ] Requests fit within total node capacity
 
-### 6.3 插件配置检查
+### 6.3 Plugins
 
-- [ ] `actions` 不为空
-- [ ] `tiers` 至少有一层
-- [ ] 插件名称正确（gang、drf、binpack 等）
-- [ ] `output.outDir` 路径合法
+- [ ] `actions` is non-empty
+- [ ] `tiers` has at least one tier
+- [ ] Plugin names are correct (gang, drf, binpack, etc.)
+- [ ] `output.outDir` is a valid path
 
 ---
 
-## 七、常见问题
+## 7. FAQ
 
-### 7.1 "0" 响应
+### 7.1 `"0"` response
 
-**问题：** reset 返回 "0"
+**Symptom:** reset returns `"0"`
 
-**原因：** 上一次的仿真还没完成
+**Cause:** the previous simulation has not finished
 
-**解决：**
+**Fix:**
+
 ```bash
-# 方法 1：等待当前仿真完成
-# 方法 2：重启 Go 仿真器
+# Option 1: wait for the current run to finish
+# Option 2: restart the Go simulator
 pkill sim
 ./sim
 ```
 
-### 7.2 资源不够
+### 7.2 Insufficient resources
 
-**问题：** 任务一直处于 Pending
+**Symptom:** tasks stay Pending
 
-**排查：**
-1. 检查节点总容量是否够
-2. 检查 `minAvailable` 是否设置过大
-3. 检查 Gang 调度条件是否满足
+**Check:**
+1. Total node capacity vs. demand
+2. Whether `minAvailable` is too large
+3. Whether Gang preconditions are satisfied
 
-### 7.3 配置不生效
+### 7.3 Config seems ignored
 
-**问题：** 修改了配置但结果没变
+**Symptom:** you changed config but results did not change
 
-**排查：**
-1. 确认修改的是正确的文件
-2. 确认 SimRun.py 中引用的是正确的路径
-3. 重启 Go 仿真器确保状态清空
-
----
-
-## 八、总结
-
-**配置编写三步走：**
-
-1. **集群配置**：定义你的"数据中心"
-   - 多少台机器？
-   - 每台多少 GPU？
-   - 每张卡多少算力和显存？
-
-2. **负载配置**：定义你的"任务"
-   - 什么任务？
-   - 什么时候提交？
-   - 需要多少资源？
-
-3. **插件配置**：定义"调度策略"
-   - 用什么调度算法？
-   - 优先利用率还是负载均衡？
-   - 结果输出到哪里？
-
-**配置即代码，版本化管理你的实验！**
+**Check:**
+1. You edited the intended files
+2. `SimRun.py` points at the right paths
+3. Restart the Go simulator to clear state
 
 ---
 
-准备好深入代码细节了吗？请继续阅读 `07-代码走读.md`！
+## 8. Summary
+
+**Three steps to writing config:**
+
+1. **Cluster:** define your “datacenter”
+   - How many machines?
+   - How many GPUs per machine?
+   - Compute and memory per card?
+
+2. **Workload:** define your “jobs”
+   - What jobs?
+   - When to submit?
+   - How much resource?
+
+3. **Plugins:** define “scheduling policy”
+   - Which algorithms?
+   - Favor utilization or spread?
+   - Where to write results?
+
+**Treat configuration as code — version-control your experiments.**
+
+---
+
+Ready to go deeper into the code? Continue with [07 — Code walkthrough](07-code-walkthrough.md).

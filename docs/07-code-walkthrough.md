@@ -1,130 +1,130 @@
-# 07-代码走读：关键实现逐行解读
+# 07 — Code walkthrough: key implementation, line by line
 
-> 本文档逐行解读 VolcanoSimulator 的关键代码实现，帮助你深入理解系统的工作原理。
+> This document walks through VolcanoSimulator’s critical code line by line so you can see how the system works in depth.
 
 ---
 
-## 一、SimRun.py 主流程
+## 1. `SimRun.py` main flow
 
-### 1.1 主函数
+### 1.1 `main`
 
 ```python
 def main():
-    # 1. 配置 ---------------------------------------------------------
-    sim_base_url = 'http://localhost:8006'  # Go 仿真器地址
+    # 1. Configuration ---------------------------------------------------------
+    sim_base_url = 'http://localhost:8006'  # Go simulator URL
     
-    # 配置文件路径（可以修改这里切换配置）
+    # Config file paths (edit here to switch configs)
     _base_dir = os.path.dirname(os.path.abspath(__file__))
     cluster_path = os.path.join(_base_dir, 'input_config', 'cluster', 'cluster_1.yaml')
     workload_path = os.path.join(_base_dir, 'input_config', 'workload', 'workload_1.yaml')
     plugins_path = os.path.join(_base_dir, 'input_config', 'plugins', 'plugins.yaml')
 
-    # 2. 加载配置 -----------------------------------------------------
-    # input_config_loader 负责把 YAML 转成仿真器能理解的格式
+    # 2. Load config -----------------------------------------------------
+    # input_config_loader turns YAML into a format the simulator understands
     nodes_yaml = load_cluster_for_simulator(cluster_path)
     workload_yaml = load_workload_for_simulator(workload_path)
     
-    # 读取粒度参数，用于后续报表
+    # Read granularity for downstream reports
     npu_granularity = workload_npu_granularity_percent_from_file(workload_path)
     
-    # 加载插件配置，同时获取输出目录
+    # Load plugin config and get output directory
     scheduler_conf_yaml, result_root = load_plugins_for_simulator(plugins_path)
 
-    # 3. 创建结果目录 -------------------------------------------------
+    # 3. Create result directory -------------------------------------------------
     os.makedirs(result_root, exist_ok=True)
     pods_result_url = result_root
 
-    # 4. 执行仿真 -----------------------------------------------------
+    # 4. Run simulation -----------------------------------------------------
     print("仿真开始")
     
-    # 4.1 初始化：告诉 Go 仿真器加载集群和任务
+    # 4.1 Init: tell the Go simulator to load cluster and workload
     reset(sim_base_url, nodes_yaml, workload_yaml)
-    time.sleep(1)  # 等待初始化完成
+    time.sleep(1)  # wait for init to finish
     
-    # 4.2 调度：推进调度并获取结果
+    # 4.2 Schedule: advance scheduling and fetch results
     step(sim_base_url, scheduler_conf_yaml, pods_result_url, npu_granularity)
     
     print("仿真结束")
 ```
 
-### 1.2 reset 函数
+### 1.2 `reset`
 
 ```python
 def reset(sim_base_url, nodes_yaml, workload_yaml):
-    """初始化仿真环境"""
+    """Initialize the simulation environment."""
     client = JsonHttpClient(sim_base_url)
 
-    # 发送 POST /reset 请求
-    # 注意：nodes_yaml 和 workload_yaml 是字符串，不是文件路径
+    # POST /reset
+    # Note: nodes_yaml and workload_yaml are strings, not file paths
     dicData = client.get_json('/reset', json={
-        'period': "-1",        # -1 表示只执行一次调度配置
-        'nodes': nodes_yaml,   # 集群配置 YAML 字符串
-        'workload': workload_yaml,  # 负载配置 YAML 字符串
+        'period': "-1",        # -1: run scheduler config only once
+        'nodes': nodes_yaml,   # cluster config YAML string
+        'workload': workload_yaml,  # workload config YAML string
     })
 
-    # 返回 "0" 表示还有任务在运行，无法重置
+    # "0" means jobs are still running; cannot reset
     if str(dicData) == "0":
         print("still job runs，can not reset")
     else:
         print("---Simualtion Reset---")
 ```
 
-### 1.3 step 函数核心逻辑
+### 1.3 Core logic of `step`
 
 ```python
 def step(sim_base_url, scheduler_conf_yaml, pods_result_url, npu_granularity):
-    """推进调度并获取结果"""
+    """Advance scheduling and fetch results."""
     client = JsonHttpClient(sim_base_url)
 
-    # 1. 发送调度配置 -------------------------------------------------
+    # 1. Send scheduler config -------------------------------------------------
     client.get_json('/step', json={
         'conf': scheduler_conf_yaml,
     })
 
-    # 2. 轮询结果 -----------------------------------------------------
-    wait = 0.2  # 等待 200ms
+    # 2. Poll for results -----------------------------------------------------
+    wait = 0.2  # 200 ms
     while True:
         time.sleep(wait)
         
-        # 拉取当前状态
+        # Pull current state
         resultdata = client.get_json('/stepResult', json={'none': ""})
         
-        # 返回 "0" 表示调度还在进行中
+        # "0" means scheduling is still in progress
         if str(resultdata) == '0':
-            continue  # 继续等待
+            continue  # keep waiting
         else:
-            # 拿到结果了！
+            # Got a result
             print("---Simulation Start---")
             
-            # 注入粒度参数，供报表使用
+            # Inject granularity for reports
             if isinstance(resultdata, dict):
                 resultdata["npuGranularityPercent"] = float(npu_granularity or 0.0)
             
-            # 生成各种报表
+            # Generate reports
             write_tasks_csv(resultdata, pods_result_url)
             write_flexnpu_report(resultdata, pods_result_url)
             write_output_config_csvs(resultdata, pods_result_url)
             
-            break  # 退出循环
+            break  # exit loop
 ```
 
 ---
 
-## 二、input_config_loader.py
+## 2. `input_config_loader.py`
 
-### 2.1 集群配置转换
+### 2.1 Cluster config conversion
 
 ```python
 def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
     """
-    把用户友好的 cluster YAML 转成仿真器格式
+    Convert user-friendly cluster YAML to simulator format
     
-    用户写的：
+    User writes:
         nodes:
           - name: node-1
             labels: {...}
     
-    仿真器要的：
+    Simulator expects:
         cluster:
           - metadata:
               name: node-1
@@ -140,7 +140,7 @@ def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
         if not name:
             raise ValueError("cluster config: node entry missing 'name'")
         
-        # 构建仿真器格式的节点定义
+        # Build simulator-style node definition
         entry: Dict[str, Any] = {
             "metadata": {
                 "name": name,
@@ -152,19 +152,19 @@ def cluster_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
         }
         cluster.append(entry)
 
-    # 转回 YAML 字符串
+    # Serialize back to YAML string
     return yaml.safe_dump({"cluster": cluster}, sort_keys=False, allow_unicode=True)
 ```
 
-### 2.2 负载配置转换（关键！）
+### 2.2 Workload config conversion (important)
 
 ```python
 def workload_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
     """
-    转换负载配置，关键功能：
-    1. 对 flexnpu_core 按粒度向上取整
-    2. 记录原始值到注解
-    3. 规范 task 结构
+    Convert workload config. Key behaviors:
+    1. Round flexnpu_core up to granularity steps
+    2. Record raw values in annotations
+    3. Normalize task structure
     """
     spec_root = doc.get("spec") or {}
     granularity = float(spec_root.get("npuGranularityPercent") or 0)
@@ -175,11 +175,11 @@ def workload_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
 
     out_jobs: List[Dict[str, Any]] = []
     for job in jobs:
-        # 深拷贝，避免修改原始数据
+        # Deep copy to avoid mutating originals
         job_copy = yaml.safe_load(yaml.safe_dump(job, sort_keys=False, allow_unicode=True))
         jspec = job_copy.get("spec") or {}
         
-        # 关键：处理 task 模板
+        # Important: normalize task templates
         _normalize_task_templates(jspec.get("tasks"), granularity)
         job_copy["spec"] = jspec
         out_jobs.append(job_copy)
@@ -189,20 +189,20 @@ def workload_input_to_simulator_yaml(doc: Dict[str, Any]) -> str:
 
 def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity: float) -> None:
     """
-    规范 task 结构，并对 flexnpu_core 做粒度取整
+    Normalize task structure and round flexnpu_core to granularity.
     """
     if not tasks:
         return
     
     for task in tasks:
-        # 把 spec 包装成 template.spec（Volcano 格式）
+        # Wrap spec as template.spec (Volcano shape)
         if "template" not in task and "spec" in task:
             task["template"] = {"spec": task.pop("spec")}
         
         tmpl = task.get("template") or {}
         pod_spec = tmpl.get("spec") or {}
         
-        # 如果有粒度设置，对 flexnpu_core 做取整
+        # If granularity is set, round flexnpu_core
         if granularity and float(granularity) > 0:
             g = float(granularity)
             raw_by_c: Dict[str, float] = {}
@@ -214,7 +214,7 @@ def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity
                 cname = str(container.get("name") or "__default__")
                 res = container.get("resources") or {}
                 
-                # 处理 requests 和 limits
+                # Handle requests and limits
                 for rk in ("requests", "limits"):
                     m = res.get(rk)
                     if not isinstance(m, dict):
@@ -229,22 +229,22 @@ def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity
                     except (TypeError, ValueError):
                         continue
                     
-                    # 向上取整到粒度步长
+                    # Round up to granularity step
                     rounded = _ceil_to_step(v, g)
                     
-                    # 记录原始值（用于利用率计算）
+                    # Record raw value (for utilization math)
                     if rk == "requests":
                         raw_by_c[cname] = v
                     elif cname not in raw_by_c:
                         raw_by_c[cname] = v
                     
-                    # 写回取整后的值
+                    # Write rounded value back
                     if rounded == int(rounded):
                         m[key] = str(int(rounded))
                     else:
                         m[key] = str(rounded)
             
-            # 将原始值写入注解，供报表使用
+            # Store raw values in annotations for reports
             if raw_by_c:
                 meta = tmpl.setdefault("metadata", {})
                 ann = meta.setdefault("annotations", {})
@@ -255,13 +255,13 @@ def _normalize_task_templates(tasks: Optional[List[Dict[str, Any]]], granularity
 
 ---
 
-## 三、main.go 主循环
+## 3. `main.go` main loop
 
-### 3.1 全局状态定义
+### 3.1 Global state
 
 ```go
 var (
-    // 集群状态（全部在内存中）
+    // Cluster state (all in memory)
     cluster = &schedulingapi.ClusterInfo{
         Nodes:          make(map[string]*schedulingapi.NodeInfo),
         Jobs:           make(map[schedulingapi.JobID]*schedulingapi.JobInfo),
@@ -270,73 +270,73 @@ var (
         RevocableNodes: make(map[string]*schedulingapi.NodeInfo),
     }
     
-    // 待提交任务队列（按提交时间排序的优先队列）
+    // Pending jobs (priority queue ordered by submit time)
     jobQueue = util.NewPriorityQueue(func(l interface{}, r interface{}) bool {
         lv := l.(*schedulingapi.JobInfo)
         rv := r.(*schedulingapi.JobInfo)
-        // 按 SubTimestamp 从小到大排序
+        // Sort by SubTimestamp ascending
         return lv.SubTimestamp.Time.Before(rv.SubTimestamp.Time)
     })
     
-    // 调度配置
-    acts  []framework.Action    // 动作链
-    tiers []conf.Tier           // 插件层级
-    cfg   []conf.Configuration  // 插件配置
+    // Scheduler config
+    acts  []framework.Action    // action chain
+    tiers []conf.Tier           // plugin tiers
+    cfg   []conf.Configuration  // plugin configuration
     
-    // 控制标志
-    loadNewSchedulerConf = true   // 是否有新配置待加载
-    notCompletion        = false  // 是否还有任务未完成
-    restartFlag          = true   // 是否正在重启
-    cnt                  = int64(0)  // 循环计数
+    // Control flags
+    loadNewSchedulerConf = true   // new config waiting to be applied
+    notCompletion        = false  // work still outstanding
+    restartFlag          = true   // restart in progress
+    cnt                  = int64(0)  // loop counter
     
-    // 仿真时钟（从 0 开始）
+    // Simulation clock (starts at 0)
     schedulingapi.NowTime = metav1.NewTime(time.Time{})
 )
 ```
 
-### 3.2 主循环
+### 3.2 Main loop
 
 ```go
 func main() {
-    // 1. 初始化默认队列和命名空间
+    // 1. Default queue and namespace
     initDefaultQueueAndNamespace()
     
-    // 2. 注册 Volcano 插件
+    // 2. Register Volcano plugins
     actions.InitV2()
     
-    // 3. 启动 HTTP 服务（在后台 goroutine 中）
+    // 3. Start HTTP server (background goroutine)
     go server()
     
     fmt.Print("simulator start...")
 
-    // 4. 主仿真循环
+    // 4. Main simulation loop
     for true {
-        // 4.1 如果无任务或正在重启，等待
+        // 4.1 Idle if no work or restarting
         for !notCompletion || restartFlag {
-            time.Sleep(time.Duration(0.2 * 1e9))  // 200ms
+            time.Sleep(time.Duration(0.2 * 1e9))  // 200 ms
         }
 
-        // 4.2 提交到时间的 Job
+        // 4.2 Submit jobs whose time has come
         for !jobQueue.Empty() {
             front := jobQueue.Pop().(*schedulingapi.JobInfo)
             
-            // 如果还没到提交时间，放回队列
+            // Not yet submit time: put back
             if schedulingapi.NowTime.Time.Before(front.SubTimestamp.Time) {
                 jobQueue.Push(front)
                 break
             } else {
-                // 提交进集群
+                // Admit into cluster
                 cluster.Jobs[front.UID] = front
                 
-                // 设置 Pod 创建时间
+                // Set Pod creation time
                 for _, task := range front.Tasks {
                     task.Pod.SetCreationTimestamp(schedulingapi.NowTime)
                 }
             }
         }
 
-        // 4.3 推进容器创建（Binding → Running）
-        // 递减倒计时
+        // 4.3 Advance container creation (Binding → Running)
+        // Decrement countdown
         for _, node := range cluster.Nodes {
             for _, task := range node.Tasks {
                 if task.Status == schedulingapi.Binding {
@@ -345,14 +345,14 @@ func main() {
             }
         }
         
-        // 将符合条件的 Binding Task 改为 Running
+        // Promote eligible Binding tasks to Running
         for _, node := range cluster.Nodes {
             if node.CtnCreationTimeInterval != 0 && 
                cnt%node.CtnCreationTimeInterval != 0 {
                 continue
             }
             
-            // 找到最早创建的、倒计时为 0 的 Binding Task
+            // Earliest-created Binding task with countdown 0
             var selectTask *schedulingapi.TaskInfo
             for _, task := range node.Tasks {
                 if task.Status != schedulingapi.Binding {
@@ -367,7 +367,7 @@ func main() {
                 }
             }
             
-            // 改为 Running
+            // Move to Running
             if selectTask != nil {
                 selectTask.Status = schedulingapi.Running
                 selectTask.Pod.Status.Phase = v1.PodRunning
@@ -375,33 +375,33 @@ func main() {
             }
         }
 
-        // 4.4 等待新的调度配置
+        // 4.4 Wait for new scheduler config
         if (cnt == 0) || (period != -1 && cnt%period == 0) {
             loadNewSchedulerConf = false
             fmt.Println("wait for conf...")
         }
         
         for !loadNewSchedulerConf {
-            time.Sleep(time.Duration(1e9))  // 1秒
+            time.Sleep(time.Duration(1e9))  // 1 s
         }
 
         if restartFlag {
             continue
         }
 
-        // 4.5 执行调度（核心！）
+        // 4.5 Run scheduling (core)
         ssn := framework.OpenSessionV2(cluster, tiers, cfg)
         for _, action := range acts {
             action.Execute(ssn)
         }
 
-        // 4.6 同步 Pod 状态（对外简化）
+        // 4.6 Sync Pod phases (simplified external view)
         syncSimulationPodPhases()
 
-        // 4.7 更新完成状态
+        // 4.7 Update completion flag
         notCompletion = clusterHasBindingTask() || !jobQueue.Empty()
 
-        // 4.8 时间 +1 秒
+        // 4.8 Advance time by 1 second
         schedulingapi.NowTime = metav1.NewTime(
             schedulingapi.NowTime.Add(time.Duration(1e9)))
         cnt += 1
@@ -411,50 +411,50 @@ func main() {
 
 ---
 
-## 四、HTTP 处理器
+## 4. HTTP handlers
 
-### 4.1 reset 处理器
+### 4.1 `reset` handler
 
 ```go
 func reset(w http.ResponseWriter, r *http.Request) {
-    // 1. 如果还有任务在运行，先停止
+    // 1. If work is still active, stop first
     if notCompletion {
         restartFlag = true
-        loadNewSchedulerConf = true  // 如果在等待配置，让它跳出
+        loadNewSchedulerConf = true  // if waiting on config, unblock
         time.Sleep(time.Duration(1e9))
         
-        // 清空队列
+        // Clear queue
         jobQueue = util.NewPriorityQueue(...)
     }
     fmt.Println("reset...")
 
-    // 2. 重置集群状态
+    // 2. Reset cluster state
     cluster = &schedulingapi.ClusterInfo{...}
     initDefaultQueueAndNamespace()
 
-    // 3. 解析请求
+    // 3. Parse request
     body, _ := ioutil.ReadAll(r.Body)
     var workload simulator.WorkloadType
     json.Unmarshal(body, &workload)
 
-    // 4. 加载节点
+    // 4. Load nodes
     err, nodes := simulator.Yaml2Nodes([]byte(workload.Nodes))
     for _, node := range nodes["cluster"] {
         nodeInfo := schedulingapi.NewNodeInfo(&node.Node)
         cluster.Nodes[nodeInfo.Name] = nodeInfo
         
-        // 设置容器创建参数
+        // Container creation parameters
         nodeInfo.CtnCreationTime = node.CtnCreationTime
         nodeInfo.CtnCreationExtraTime = node.CtnCreationExtraTime
         nodeInfo.CtnCreationTimeInterval = node.CtnCreationTimeInterval
     }
 
-    // 5. 加载任务
+    // 5. Load jobs
     err, jobs := simulator.Yaml2Jobs([]byte(workload.Workload))
     for _, job := range jobs["jobs"] {
         jobInfo := schedulingapi.NewJobInfoV2(job)
         
-        // 解析提交时间
+        // Parse submit time
         if subTime, found := job.Labels["sub-time"]; found {
             if timestamp, err := strconv.Atoi(subTime); err == nil {
                 jobInfo.SubTimestamp = metav1.NewTime(
@@ -468,7 +468,7 @@ func reset(w http.ResponseWriter, r *http.Request) {
     notCompletion = true
     fmt.Println("reset done")
 
-    // 6. 返回确认
+    // 6. Acknowledge
     info := simulator.Info{Done: !notCompletion, ...}
     resp, _ := json.Marshal(info)
     restartFlag = false
@@ -476,7 +476,7 @@ func reset(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-### 4.2 step 处理器
+### 4.2 `step` handler
 
 ```go
 func step(w http.ResponseWriter, r *http.Request) {
@@ -484,7 +484,7 @@ func step(w http.ResponseWriter, r *http.Request) {
     var scheduler_conf simulator.ConfType
     json.Unmarshal(body, &scheduler_conf)
 
-    // 解析调度配置
+    // Parse scheduler config
     acts, tiers, cfg, err = scheduler.UnmarshalSchedulerConfV2(scheduler_conf.Conf)
     if err != nil {
         fmt.Println("error:", err)
@@ -494,27 +494,27 @@ func step(w http.ResponseWriter, r *http.Request) {
     fmt.Println("load conf:")
     fmt.Println(scheduler_conf.Conf)
 
-    // 标记有新配置，主循环会执行调度
+    // Signal new config; main loop will run scheduling
     loadNewSchedulerConf = true
 
     w.Write([]byte(`1`))
 }
 ```
 
-### 4.3 stepResult 处理器
+### 4.3 `stepResult` handler
 
 ```go
 func stepResult(w http.ResponseWriter, r *http.Request) {
-    // 如果还在调度中，返回 "0"
+    // Still scheduling → "0"
     if loadNewSchedulerConf && notCompletion {
         w.Write([]byte(`0`))
         return
     }
 
-    // 构建返回数据
+    // Build payload
     var v1NodeList []*v1.Node
     for _, node := range cluster.Nodes {
-        // 构建精简的节点信息
+        // Trimmed node view
         v1Node := util.BuildNode(node.Name, ...)
         v1NodeList = append(v1NodeList, v1Node)
     }
@@ -543,9 +543,9 @@ func stepResult(w http.ResponseWriter, r *http.Request) {
 
 ---
 
-## 五、flexnpu_util_report.py 核心算法
+## 5. `flexnpu_util_report.py` core algorithms
 
-### 5.1 Pod → 卡分配估算
+### 5.1 Pod → card allocation estimate
 
 ```python
 def estimate_card_usage(
@@ -554,34 +554,34 @@ def estimate_card_usage(
     granularity: float
 ) -> Dict[str, List[Dict]]:
     """
-    估算 Pod 在 GPU 卡上的分配
+    Estimate how Pods split across GPU cards
     
-    策略：轮询分配
+    Strategy: round-robin placement
     """
     pod_shares = {}
-    next_idx = 0  # 下一个分配的卡索引
+    next_idx = 0  # next card index to assign
     
     for pod in pods:
-        # 解析 Pod 的资源需求
+        # Parse Pod resource needs
         pod_name = pod["metadata"]["name"]
         annotations = pod["metadata"].get("annotations", {})
         
-        # 需要多少张卡
+        # How many cards
         num_cards = int(annotations.get("volcano.sh/flexnpu-num", 1))
         
-        # 总资源需求
+        # Total demand
         total_core = get_pod_core_request(pod)
         total_mem = get_pod_memory_request(pod)
         
-        # 每张卡的资源
+        # Per-card share
         core_per_card = total_core / num_cards
         mem_per_card = total_mem / num_cards
         
-        # 按粒度取整（分配侧）
+        # Round to granularity (allocation side)
         if granularity > 0:
             core_per_card = math.ceil(core_per_card / granularity) * granularity
         
-        # 轮询分配
+        # Round-robin assignment
         assigned = []
         for i in range(num_cards):
             card_idx = (next_idx + i) % len(node_cards)
@@ -599,12 +599,12 @@ def estimate_card_usage(
     return pod_shares
 ```
 
-### 5.2 利用率计算
+### 5.2 Utilization computation
 
 ```python
 def compute_flexnpu_snapshot(resultdata: Dict) -> Dict:
     """
-    计算 FlexNPU 利用率快照
+    Compute a FlexNPU utilization snapshot
     """
     nodes = resultdata.get("Nodes", {})
     jobs = resultdata.get("Jobs", {})
@@ -613,23 +613,23 @@ def compute_flexnpu_snapshot(resultdata: Dict) -> Dict:
     snapshot = {}
     
     for node_name, node_info in nodes.items():
-        # 1. 解析节点的卡列表
+        # 1. Parse card list for the node
         cards = parse_node_cards(node_info)
         
-        # 2. 获取节点上的 Pod
+        # 2. Pods on this node
         pods = get_pods_on_node(jobs, node_name)
         
-        # 3. 估算 Pod 到卡的分配
+        # 3. Estimate Pod→card mapping
         pod_shares = estimate_card_usage(cards, pods, granularity)
         
-        # 4. 计算卡级利用率
+        # 4. Per-card utilization
         card_stats = {}
         for card in cards:
             card_id = card["id"]
             total_core = card["capacity"]
             total_mem = card["memory"]
             
-            # 累加各 Pod 在该卡上的使用
+            # Sum Pod usage on this card
             used_core = 0
             used_mem = 0
             for pod_name, shares in pod_shares.items():
@@ -647,7 +647,7 @@ def compute_flexnpu_snapshot(resultdata: Dict) -> Dict:
                 "utilization_mem": used_mem / total_mem * 100 if total_mem > 0 else 0,
             }
         
-        # 5. 计算节点级汇总
+        # 5. Node-level rollup
         total_capacity_core = sum(c["capacity"] for c in cards)
         total_used_core = sum(s["used_core"] for s in card_stats.values())
         
@@ -661,33 +661,33 @@ def compute_flexnpu_snapshot(resultdata: Dict) -> Dict:
 
 ---
 
-## 六、关键设计模式
+## 6. Key design patterns
 
-### 6.1 观察者模式
+### 6.1 Observer (polling)
 
-Python 客户端通过轮询观察 Go 仿真器的状态变化：
+The Python client observes the Go simulator by polling:
 
 ```python
-# Python 端
+# Python side
 while True:
     result = client.get_json('/stepResult')
-    if str(result) != '0':  # 状态变化了！
+    if str(result) != '0':  # state changed
         handle_result(result)
         break
     time.sleep(0.2)
 ```
 
-### 6.2 状态机模式
+### 6.2 State machine
 
-Pod 的状态转换：
+Pod phase transitions:
 
 ```
-Pending ──[调度器分配]──> Pipelined ──[Gang满足]──> Binding ──[容器创建]──> Running
+Pending ──[scheduler assigns]──> Pipelined ──[Gang satisfied]──> Binding ──[container start]──> Running
 ```
 
-### 6.3 策略模式
+### 6.3 Strategy
 
-调度插件通过接口实现不同的策略：
+Scheduler plugins implement different policies via interfaces:
 
 ```go
 type Plugin interface {
@@ -697,22 +697,22 @@ type Plugin interface {
     // ...
 }
 
-// Gang 插件
+// Gang plugin
 type gangPlugin struct{}
 func (g *gangPlugin) Name() string { return "gang" }
 
-// DRF 插件
+// DRF plugin
 type drfPlugin struct{}
 func (d *drfPlugin) Name() string { return "drf" }
 ```
 
-### 6.4 工厂模式
+### 6.4 Factory
 
-创建不同的 Action：
+Registering Actions:
 
 ```go
 func InitV2() {
-    // 注册各种 Action
+    // Register Actions
     RegisterAction("enqueue", enqueue.New())
     RegisterAction("allocate", allocate.New())
     RegisterAction("preempt", preempt.New())
@@ -722,84 +722,80 @@ func InitV2() {
 
 ---
 
-## 七、调试技巧
+## 7. Debugging tips
 
-### 7.1 在 Go 代码中加日志
+### 7.1 Logging in Go
 
 ```go
 func main() {
-    // 在关键位置打印日志
+    // Log at important points
     fmt.Printf("当前时间: %v\n", schedulingapi.NowTime)
     fmt.Printf("待提交队列长度: %d\n", jobQueue.Len())
     fmt.Printf("集群任务数: %d\n", len(cluster.Jobs))
 }
 ```
 
-### 7.2 在 Python 中查看原始数据
+### 7.2 Inspecting raw data in Python
 
 ```python
 def step(...):
     resultdata = client.get_json('/stepResult', ...)
     
-    # 打印原始数据
+    # Print raw payload
     import json
     print(json.dumps(resultdata, indent=2))
     
-    # 或者保存到文件
+    # Or write to disk
     with open('debug_result.json', 'w') as f:
         json.dump(resultdata, f, indent=2)
 ```
 
-### 7.3 用 pdb 调试
+### 7.3 Using `pdb`
 
 ```python
 import pdb
 
 def some_function():
-    # 设置断点
+    # Breakpoint
     pdb.set_trace()
     
-    # 代码会在这里暂停，可以查看变量、单步执行
+    # Execution pauses here; inspect variables and step
     result = process_data()
     return result
 ```
 
 ---
 
-## 八、总结
+## 8. Summary
 
-**关键代码路径：**
+**Important code paths:**
 
 ```
-Python 端：
-  SimRun.py::main() 
+Python:
+  SimRun.py::main()
     → reset() → input_config_loader.load_*()
     → step() → JsonHttpClient.get_json()
     → flexnpu_util_report.compute_*()
     → output_csv_reports.write_*()
 
-Go 端：
+Go:
   main.go::main()
     → server() [goroutine]
-    → 主循环:
+    → main loop:
       - submitDueJobs()
       - advanceContainerCreation()
       - runScheduling() → framework.OpenSessionV2() → actions.Execute()
       - syncSimulationPodPhases()
 ```
 
-**核心设计：**
-1. **离散时间**：1 秒粒度，简单可控
-2. **异步通信**：HTTP 轮询，解耦两边
-3. **双轨统计**：原始需求 vs 实际分配
-4. **真实调度**：运行真实的 Volcano 代码
+**Core ideas:**
+1. **Discrete time**: one-second ticks, easy to reason about
+2. **Async boundary**: HTTP polling decouples the two sides
+3. **Dual-track metrics**: raw demand vs allocated/rounded values
+4. **Real scheduler**: runs actual Volcano code
 
 ---
 
-**恭喜你读完了全部文档！现在你可以：**
-- 理解系统的工作原理
-- 修改代码添加新功能
-- 设计自己的实验场景
-- 为项目贡献代码
+You now have a full walkthrough of the docs: you can see how the system works, change code to add features, design experiments, and contribute to the project.
 
-**Happy Simulating! 🚀**
+**Happy simulating.**
