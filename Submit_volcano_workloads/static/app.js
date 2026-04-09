@@ -20,6 +20,54 @@
   let statusTimer = null;
   let runPollTimer = null;
 
+  function wireFilePicker(input, button, nameEl, emptyText, multiple) {
+    function update() {
+      const files = input.files;
+      if (!files || !files.length) {
+        nameEl.textContent = emptyText;
+        return;
+      }
+      if (multiple) {
+        const names = Array.from(files)
+          .map((f) => f.name)
+          .join(", ");
+        const summary =
+          files.length === 1
+            ? names
+            : files.length + " files: " + names;
+        nameEl.textContent =
+          summary.length > 72 ? summary.slice(0, 69) + "…" : summary;
+      } else {
+        nameEl.textContent = files[0].name;
+      }
+    }
+    button.addEventListener("click", () => input.click());
+    input.addEventListener("change", update);
+    update();
+  }
+
+  wireFilePicker(
+    els.fileCluster,
+    document.getElementById("btnPickCluster"),
+    document.getElementById("nameCluster"),
+    "No file chosen",
+    false
+  );
+  wireFilePicker(
+    els.fileWorkload,
+    document.getElementById("btnPickWorkload"),
+    document.getElementById("nameWorkload"),
+    "No file chosen",
+    false
+  );
+  wireFilePicker(
+    els.filePlugins,
+    document.getElementById("btnPickPlugins"),
+    document.getElementById("namePlugins"),
+    "No files chosen",
+    true
+  );
+
   async function fetchHealth() {
     try {
       const r = await fetch("/api/health");

@@ -119,7 +119,47 @@ body {
   border-bottom: 1px solid #f1f5f9;
 }
 .file-label { display: block; font-size: 0.75rem; font-weight: 600; color: #475569; margin: 0.5rem 0 0.25rem; }
-input[type="file"] { width: 100%; font-size: 0.75rem; margin-bottom: 0.5rem; }
+.file-picker-row { margin-bottom: 0.5rem; }
+.file-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+/* Hide native file control (OS/browser locale); use English button + label */
+.file-input-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.btn-file {
+  flex: 0 0 auto;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #334155;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.btn-file:hover { background: #f8fafc; border-color: #94a3b8; }
+.file-chosen {
+  flex: 1 1 120px;
+  min-width: 0;
+  font-size: 0.72rem;
+  color: #64748b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .scale-box {
   margin-top: 1rem;
   padding: 1rem;
