@@ -9,6 +9,6 @@
 ## Inside the company network
 
 1. Clone the same repository: `git@github.com:yaochuancun/volcanoSimulator.git`.
-2. Upgrade or sync plugin-related code under the `plugins` folder  (copy https://codehub-g.huawei.com/cis/csd/openvessel/volcano/apollo/files?ref=master&filePath=pkg%2Fscheduler%2Fplugins - master branch).
+2. Upgrade or sync plugin-related code under the `plugins` folder 
 3. Debug, then push to the internal CodeHub repo.
 
