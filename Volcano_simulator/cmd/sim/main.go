@@ -18,6 +18,7 @@ import (
 	schedulingapi "volcano.sh/volcano/pkg/scheduler/api"
 	"volcano.sh/volcano/pkg/scheduler/conf"
 	"volcano.sh/volcano/pkg/scheduler/framework"
+	_ "volcano.sh/volcano/pkg/scheduler/plugins"
 	"volcano.sh/volcano/pkg/scheduler/util"
 	"volcano.sh/volcano/pkg/simulator"
 )
