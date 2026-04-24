@@ -172,13 +172,13 @@
       return d[gi % d.length] || "";
     };
 
-    const W = 880;
+    const PLOT_W = 880;
     const H = 520;
     const padL = 72;
     const padR = 72;
     const padT = 48;
     const padB = 120;
-    const innerW = W - padL - padR;
+    const innerW = PLOT_W - padL - padR;
     const innerH = H - padT - padB;
     const sMin = scales[0];
     const sMax = scales[scales.length - 1] || sMin;
@@ -203,6 +203,7 @@
     let bars = "";
     let legend = "";
     const legendStepX = 220;
+    const legendHitW = Math.max(160, legendStepX - 12);
     const memDashAttr = ' stroke-dasharray="1 3" stroke-opacity="0.75"';
 
     algorithms.forEach((algo, ai) => {
@@ -265,7 +266,6 @@
 
         const legLabel = escapeXml(algo.name) + " · " + gran + "%";
         const lx = 12 + seriesIdx * legendStepX;
-        const hitW = Math.max(160, legendStepX - 12);
         legend += `<g class="legend-item" data-series="${seriesIdx}" transform="translate(${lx},0)">
         <rect x="0" y="-14" width="10" height="10" rx="2" fill="${color}" />
         <text x="16" y="-5" class="lg">${legLabel}</text>
@@ -274,7 +274,7 @@
         <line x1="0" y1="24" x2="18" y2="24" stroke="${color}" stroke-width="2"${memDashAttr} />
         <text x="22" y="27" class="lg-sm">Flexnpu-memory</text>
         <text x="0" y="42" class="lg-sm">Core / memory alloc %</text>
-        <rect class="legend-hit" data-series="${seriesIdx}" x="0" y="-16" width="${hitW}" height="22" fill="transparent" pointer-events="all" />
+        <rect class="legend-hit" data-series="${seriesIdx}" x="0" y="-16" width="${legendHitW}" height="22" fill="transparent" pointer-events="all" />
       </g>`;
       });
     });
@@ -282,7 +282,7 @@
     let grid = "";
     [0, 25, 50, 75, 100].forEach((tick) => {
       const y = yAlloc(tick);
-      grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${W - padR}" y2="${y.toFixed(1)}" stroke="#f1f5f9" />`;
+      grid += `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${PLOT_W - padR}" y2="${y.toFixed(1)}" stroke="#f1f5f9" />`;
       grid += `<text x="${padL - 8}" y="${(y + 4).toFixed(1)}" text-anchor="end" class="tick">${tick}%</text>`;
     });
 
@@ -290,7 +290,7 @@
     for (let i = 0; i <= podTicks; i++) {
       const val = Math.round((maxPods * i) / podTicks);
       const z = yPods(val);
-      grid += `<text x="${W - padR + 10}" y="${(z + 4).toFixed(1)}" class="tick-r">${val}</text>`;
+      grid += `<text x="${PLOT_W - padR + 10}" y="${(z + 4).toFixed(1)}" class="tick-r">${val}</text>`;
     }
 
     let xTicks = "";
@@ -300,7 +300,12 @@
       xTicks += `<text x="${x.toFixed(1)}" y="${H - padB + 22}" text-anchor="middle" class="tick">${sc}x</text>`;
     });
 
-    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    const legendTotalW =
+      seriesCount > 0 ? 12 + (seriesCount - 1) * legendStepX + legendHitW + 16 : 200;
+    const svgCanvasW = Math.max(PLOT_W, legendTotalW + 48);
+    const legendTranslateX = (svgCanvasW - legendTotalW) / 2;
+
+    return `<svg viewBox="0 0 ${svgCanvasW} ${H}" width="${svgCanvasW}" height="${H}" preserveAspectRatio="xMinYMid meet" xmlns="http://www.w3.org/2000/svg" style="min-width:${svgCanvasW}px;max-width:none">
       <style>
         .axis-label { font-size: 10px; font-weight: 800; fill: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
         .tick { font-size: 10px; fill: #94a3b8; font-family: ui-monospace, monospace; }
@@ -313,13 +318,13 @@
         .legend-hit:hover { fill: rgba(148, 163, 184, 0.22); }
       </style>
       <text transform="translate(${padL - 52},${(padT + H - padB) / 2}) rotate(-90)" text-anchor="middle" class="axis-label">Flexnpu core &amp; memory alloc %</text>
-      <text transform="translate(${W - padR + 52},${(padT + H - padB) / 2}) rotate(90)" text-anchor="middle" class="axis-label">Running pods</text>
-      <text x="${(padL + W - padR) / 2}" y="${H - 70}" text-anchor="middle" class="axis-label">Workload scale</text>
+      <text transform="translate(${PLOT_W - padR + 52},${(padT + H - padB) / 2}) rotate(90)" text-anchor="middle" class="axis-label">Running pods</text>
+      <text x="${(padL + PLOT_W - padR) / 2}" y="${H - 70}" text-anchor="middle" class="axis-label">Workload scale</text>
       ${grid}
       ${xTicks}
       ${bars}
       ${paths}
-      <g transform="translate(${(padL + W - padR) / 2 - (12 + Math.max(0, seriesCount - 1) * 220 + 180) / 2}, ${H - 52})">${legend}</g>
+      <g transform="translate(${legendTranslateX}, ${H - 52})">${legend}</g>
     </svg>`;
   }
 

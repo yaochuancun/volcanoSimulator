@@ -217,7 +217,7 @@ body {
 .card-head h2 { margin: 0; font-size: 1.1rem; }
 .card-desc { margin: 0.35rem 0 0; font-size: 0.7rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.05em; }
 .svg-wrap { width: 100%; overflow-x: auto; }
-.svg-wrap svg { display: block; width: 100%; max-width: 920px; height: auto; margin: 0 auto; }
+.svg-wrap svg { display: block; max-width: none; height: auto; margin: 0 auto; }
 
 .table-wrap { overflow-x: auto; }
 .data-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
