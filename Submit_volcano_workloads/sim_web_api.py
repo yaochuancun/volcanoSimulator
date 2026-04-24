@@ -1,4 +1,4 @@
-"""Features: Single-user & single-concurrency; accepts cluster, workload, and multiple plugins, runs simulations based on algorithm × scaling factor, outputs results to CSV files, returns progress and chart data to the frontend, and supports ZIP export.
+"""Features: Single-user & single-concurrency; accepts cluster, workload, and multiple plugins, runs simulations based on algorithm × workload scale × npuGranularityPercent (1% or 25%), outputs results to CSV files, returns progress and chart data to the frontend, and supports ZIP export.
 Prerequisite: The Go-based simulator is running (default address: http://127.0.0.1:8006).
 Run Example (under the Submit_volcano_workloads directory)::
 
@@ -32,7 +32,6 @@ from pydantic import BaseModel
 from input_config.input_config_loader import (
     cluster_yaml_text_to_simulator_yaml,
     plugins_document_scheduler_and_outdir,
-    workload_npu_granularity_percent_from_doc,
     workload_doc_to_simulator_yaml,
 )
 from input_config.sim_metrics import compute_chart_metrics
@@ -82,6 +81,25 @@ def _parse_scales(s: str) -> List[float]:
     return out if out else [1.0]
 
 
+_ALLOWED_NPU_GRANULARITY_PERCENTS = frozenset({1, 25})
+
+
+def _parse_npu_granularity_percents(s: str) -> List[int]:
+    """Parse comma-separated ints; only 1 and 25 are kept. Default [1] if none valid."""
+    seen: set[int] = set()
+    for part in (s or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            v = int(part, 10)
+        except ValueError:
+            continue
+        if v in _ALLOWED_NPU_GRANULARITY_PERCENTS:
+            seen.add(v)
+    return sorted(seen) if seen else [1]
+
+
 def _normalize_uploaded_text(text: str) -> str:
     if not text:
         return ""
@@ -128,6 +146,7 @@ def _run_simulation_worker(
     cluster_text: str,
     workload_text: str,
     scales: List[float],
+    npu_grans: List[int],
     plugin_payloads: List[Tuple[str, str]],
     sim_url: str,
 ) -> None:
@@ -141,8 +160,7 @@ def _run_simulation_worker(
         state.error = "Invalid workload YAML"
         return
 
-    npu_gran = workload_npu_granularity_percent_from_doc(base_wd)
-    total = max(1, len(scales) * len(plugin_payloads))
+    total = max(1, len(scales) * len(plugin_payloads) * len(npu_grans))
     state.total_steps = total
     state.done_steps = 0
     state.progress_percent = 0.0
@@ -173,59 +191,66 @@ def _run_simulation_worker(
                 raise ValueError(f"Invalid plugins YAML: {algo_name}")
 
             for sc in scales:
-                state.current_step_label = f"{algo_id} × scale {sc}"
-                state.progress_percent = round(
-                    100.0 * state.done_steps / total, 2
-                )
-                state.message = f"{state.current_step_label} — reset…"
-
-                scaled_doc = scale_workload_document(base_wd, sc)
-                workload_yaml = workload_doc_to_simulator_yaml(scaled_doc)
-
-                sub = f"{algo_id}_scale_{sc}".replace(".", "_")
-                out_sub = run_dir / "results" / sub
-                out_sub.mkdir(parents=True, exist_ok=True)
-
-                scheduler_yaml, pods_url = plugins_document_scheduler_and_outdir(
-                    plug_doc, str(out_sub)
-                )
-                os.makedirs(pods_url, exist_ok=True)
-
-                reset(sim_url, nodes_yaml, workload_yaml)
-                time.sleep(0.3)
-                state.progress_percent = round(
-                    100.0 * (state.done_steps + 0.35) / total, 2
-                )
-                state.message = f"{state.current_step_label} — scheduling…"
-                snap = step(sim_url, scheduler_yaml, pods_url, npu_gran)
-
-                metrics = compute_chart_metrics(snap) if snap else None
-                row: Dict[str, Any] = {
-                    "algorithm_id": algo_id,
-                    "algorithm_name": algorithms_meta[pi]["name"],
-                    "scale": sc,
-                    "result_subdir": str(out_sub.relative_to(run_dir)),
-                }
-                if metrics:
-                    row.update(metrics)
-                else:
-                    row.update(
-                        {
-                            "allocation_rate_avg": 0.0,
-                            "running_pods": 0,
-                            "fragmentation_rate": 0.0,
-                        }
+                for gran in npu_grans:
+                    state.current_step_label = f"{algo_id} × scale {sc} × npu {gran}%"
+                    state.progress_percent = round(
+                        100.0 * state.done_steps / total, 2
                     )
-                points.append(row)
+                    state.message = f"{state.current_step_label} — reset…"
 
-                state.done_steps += 1
-                state.progress_percent = round(100.0 * state.done_steps / total, 2)
-                state.message = f"{state.current_step_label} — done"
-                state.chart = {
-                    "algorithms": algorithms_meta,
-                    "scales": scales,
-                    "points": list(points),
-                }
+                    scaled_doc = scale_workload_document(base_wd, sc)
+                    if not isinstance(scaled_doc.get("spec"), dict):
+                        scaled_doc["spec"] = {}
+                    scaled_doc["spec"]["npuGranularityPercent"] = gran
+                    workload_yaml = workload_doc_to_simulator_yaml(scaled_doc)
+
+                    sub = f"{algo_id}_scale_{sc}_npu_{gran}".replace(".", "_")
+                    out_sub = run_dir / "results" / sub
+                    out_sub.mkdir(parents=True, exist_ok=True)
+
+                    scheduler_yaml, pods_url = plugins_document_scheduler_and_outdir(
+                        plug_doc, str(out_sub)
+                    )
+                    os.makedirs(pods_url, exist_ok=True)
+
+                    reset(sim_url, nodes_yaml, workload_yaml)
+                    time.sleep(0.3)
+                    state.progress_percent = round(
+                        100.0 * (state.done_steps + 0.35) / total, 2
+                    )
+                    state.message = f"{state.current_step_label} — scheduling…"
+                    snap = step(sim_url, scheduler_yaml, pods_url, float(gran))
+
+                    metrics = compute_chart_metrics(snap) if snap else None
+                    row: Dict[str, Any] = {
+                        "algorithm_id": algo_id,
+                        "algorithm_name": algorithms_meta[pi]["name"],
+                        "scale": sc,
+                        "npu_granularity_percent": gran,
+                        "result_subdir": str(out_sub.relative_to(run_dir)),
+                    }
+                    if metrics:
+                        row.update(metrics)
+                    else:
+                        row.update(
+                            {
+                                "allocation_rate_avg": 0.0,
+                                "allocation_memory_rate_avg": 0.0,
+                                "running_pods": 0,
+                                "fragmentation_rate": 0.0,
+                            }
+                        )
+                    points.append(row)
+
+                    state.done_steps += 1
+                    state.progress_percent = round(100.0 * state.done_steps / total, 2)
+                    state.message = f"{state.current_step_label} — done"
+                    state.chart = {
+                        "algorithms": algorithms_meta,
+                        "scales": scales,
+                        "granularities": list(npu_grans),
+                        "points": list(points),
+                    }
 
         state.status = "succeeded"
         state.message = "Done"
@@ -234,6 +259,7 @@ def _run_simulation_worker(
             "run_id": run_id,
             "simulator_url": sim_url,
             "scales": scales,
+            "npu_granularity_percents": list(npu_grans),
             "algorithms": algorithms_meta,
             "points": points,
         }
@@ -292,9 +318,11 @@ async def api_start_run(
     cluster: UploadFile = File(...),
     workload: UploadFile = File(...),
     workload_scales: str = Form("1.0"),
+    npu_granularity_percents: str = Form("1"),
     plugins: List[UploadFile] = File(...),
 ) -> JSONResponse:
     scales = _parse_scales(workload_scales)
+    npu_grans = _parse_npu_granularity_percents(npu_granularity_percents)
     if not plugins:
         raise HTTPException(400, "At least one plugins YAML is required")
 
@@ -342,7 +370,12 @@ async def api_start_run(
             status="running",
             message="Starting",
             run_dir=str(run_dir),
-            chart={"algorithms": [], "scales": scales, "points": []},
+            chart={
+                "algorithms": [],
+                "scales": scales,
+                "granularities": list(npu_grans),
+                "points": [],
+            },
         )
         _active["run_id"] = run_id
         _active["state"] = state
@@ -354,6 +387,7 @@ async def api_start_run(
                 cluster_text,
                 workload_text,
                 scales,
+                npu_grans,
                 plugin_payloads,
                 DEFAULT_SIM_URL,
             ),

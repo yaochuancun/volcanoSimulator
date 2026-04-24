@@ -179,6 +179,34 @@ body {
 }
 .scale-input:focus { outline: none; border-color: #ea580c; }
 
+.scale-box .gran-label { margin-top: 0.85rem; }
+.gran-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+.gran-toggle {
+  flex: 1 1 auto;
+  min-width: 4rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #94a3b8;
+  cursor: pointer;
+}
+.gran-toggle:hover { border-color: #64748b; color: #cbd5e1; }
+.gran-toggle.is-on {
+  background: #020617;
+  color: #fdba74;
+  border-color: #ea580c;
+  box-shadow: 0 0 0 1px rgba(234, 88, 12, 0.35);
+}
+
 .main-col { display: flex; flex-direction: column; gap: 1.25rem; }
 .card {
   background: #fff;
@@ -198,3 +226,75 @@ body {
 .data-table thead { background: #f8fafc; font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; }
 .algo-cell { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
 .algo-swatch { width: 6px; height: 18px; border-radius: 2px; }
+
+/* NPU fragmentation matrix (double header + rowspan) */
+.frag-matrix-table { min-width: 520px; font-size: 0.8rem; border: 1px solid #e2e8f0; }
+.frag-matrix-table th,
+.frag-matrix-table td {
+  text-align: center;
+  border: 1px solid #e2e8f0;
+  vertical-align: middle;
+}
+.frag-matrix-table th:first-child,
+.frag-matrix-table td:first-child {
+  text-align: center;
+}
+.frag-matrix-corner {
+  background: #1e3a5f;
+  border-color: #1e3a5f;
+}
+.frag-matrix-scale-band {
+  background: #1e3a5f;
+  color: #fff;
+  font-weight: 800;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  border-color: #1e3a5f;
+}
+.frag-matrix-subhead {
+  background: #f1f5f9;
+  color: #475569;
+  font-weight: 700;
+  font-size: 0.62rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.frag-matrix-metric-head {
+  white-space: nowrap;
+}
+.frag-matrix-placeholder {
+  background: #f8fafc;
+  color: #94a3b8;
+  font-weight: 600;
+  padding: 1rem;
+}
+.frag-matrix-algo {
+  background: #fff;
+  font-weight: 600;
+}
+.frag-matrix-gran {
+  background: #fafafa;
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  color: #334155;
+}
+.frag-matrix-num {
+  font-variant-numeric: tabular-nums;
+}
+.frag-matrix-table tbody tr:nth-child(even) .frag-matrix-gran,
+.frag-matrix-table tbody tr:nth-child(even) .frag-matrix-num {
+  background: #f1f5f9;
+}
+.frag-matrix-table thead {
+  background: transparent;
+}
+.algo-cell-matrix {
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-height: 3rem;
+}
+@media (min-width: 640px) {
+  .algo-cell-matrix { flex-direction: row; }
+}

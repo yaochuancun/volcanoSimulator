@@ -69,13 +69,18 @@
         <div class="scale-box">
           <label class="file-label" for="scaleInput">Workload scale factor (comma-separated)</label>
           <input type="text" id="scaleInput" class="scale-input" value="1.0, 2.0" placeholder="e.g. 1.0, 2.25, 5.0" />
+          <label class="file-label gran-label">NPU granularity</label>
+          <div class="gran-toggle-row" role="group" aria-label="NPU granularity percent">
+            <button type="button" class="gran-toggle is-on" data-gran="1" id="granBtn1" aria-pressed="true">1%</button>
+            <button type="button" class="gran-toggle" data-gran="25" id="granBtn25" aria-pressed="false">25%</button>
+          </div>
         </div>
       </aside>
 
       <div class="main-col">
         <section class="card chart-card">
           <div class="card-head">
-            <h2>Cluster Resource Analysis</h2>
+            <h2>Scheduling Strategy Evaluation</h2>
             <!-- <p class="card-desc">折线：各算法节点平均分配率（%）；柱：首次快照 Running Pod 数</p> -->
           </div>
           <div class="svg-wrap" id="chartMount"></div>
@@ -83,12 +88,11 @@
 
         <section class="card">
           <div class="card-head">
-            <h2>NPU Fragmentation Rate</h2>
-            <p class="card-desc">NO DATA YET. RUN A SIMULATION.</p>
+            <h2>Performance Comparison of Scheduling Algorithms</h2>
           </div>
           <div class="table-wrap">
-            <table class="data-table" id="fragTable">
-              <thead><tr><th>Algorithm</th></tr></thead>
+            <table class="data-table frag-matrix-table" id="fragTable">
+              <thead></thead>
               <tbody></tbody>
             </table>
           </div>
