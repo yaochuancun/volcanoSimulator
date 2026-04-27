@@ -138,3 +138,4 @@ Submit_volcano_workloads/volcano-sim-result
 # SimRun plugin output (input_config plugins.yaml outDir)
 Submit_volcano_workloads/result/
 Submit_volcano_workloads/var/
+Submit_volcano_workloads/batch_results/

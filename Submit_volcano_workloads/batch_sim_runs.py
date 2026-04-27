@@ -2,8 +2,11 @@
 """Run the Go Volcano simulator repeatedly with fixed cluster / workload / scheduler (plugins) configs.
 
 Each iteration writes the same metric CSVs as ``SimRun.step`` (``Node_desc.csv``, ``POD_desc.csv``,
-``npu_chip.csv``, ``summary.csv``, ``tasksSUM.csv``, etc.) into a dedicated subdirectory under
-``--output-dir`` (e.g. ``run_0001/``, ``run_0002/``, …).
+``npu_chip.csv``, ``summary.csv``, ``tasksSUM.csv``, etc.) into a dedicated subdirectory
+(``run_0001/``, ``run_0002/``, …).
+
+By default all runs go under ``Submit_volcano_workloads/batch_results/<YYYY-MM-DD-HH-MM-SS>/``.
+Use ``--output-dir`` only to override that root path.
 
 Prerequisites:
   - Go simulator listening on ``--sim-url`` (default ``http://127.0.0.1:8006``).
@@ -16,8 +19,7 @@ Example::
         --cluster input_config/cluster/cluster.yaml \\
         --workload input_config/workload/workload.yaml \\
         --plugins input_config/plugins/plugins.yaml \\
-        --runs 100 \\
-        --output-dir D:/experiments/batch_001
+        --runs 100
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -47,7 +50,7 @@ from SimRun import reset, step  # noqa: E402
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Repeated simulator runs: same node + workload + plugins YAML; CSVs per run under --output-dir.",
+        description="Repeated simulator runs: same node + workload + plugins YAML; CSVs per run under batch_results/<datetime>/ by default.",
     )
     p.add_argument(
         "--cluster",
@@ -72,8 +75,12 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--output-dir",
-        required=True,
-        help="Directory to create; each run writes CSVs under run_NNNN/ here.",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Root directory for this batch (each run uses run_NNNN/ inside). "
+            "Default: batch_results/<YYYY-MM-DD-HH-MM-SS>/ under this script's directory."
+        ),
     )
     p.add_argument(
         "--sim-url",
@@ -118,7 +125,12 @@ def main() -> int:
     cluster_path = Path(args.cluster).resolve()
     workload_path = Path(args.workload).resolve()
     plugins_path = Path(args.plugins).resolve()
-    out_root = Path(args.output_dir).resolve()
+
+    if args.output_dir:
+        out_root = Path(args.output_dir).expanduser().resolve()
+    else:
+        stamp = datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
+        out_root = (_SCRIPT_DIR / "batch_results" / stamp).resolve()
 
     for p, label in (
         (cluster_path, "cluster"),
@@ -145,6 +157,8 @@ def main() -> int:
         "runs_ok": 0,
         "runs_failed": 0,
         "runs": [],
+        "output_root": str(out_root),
+        "output_dir_from_cli": bool(args.output_dir),
     }
 
     print(f"Output root: {out_root}")
