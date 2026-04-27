@@ -158,6 +158,15 @@
     );
   }
 
+  /** Flexnpu-memory line: 1% dashed, 25% dotted; other gran matches 1%. */
+  function memoryLineStyleAttr(gran) {
+    const g = Number(gran);
+    if (g === 25) {
+      return ' stroke-dasharray="2 5" stroke-linecap="round" stroke-opacity="0.78"';
+    }
+    return ' stroke-dasharray="8 5" stroke-linecap="round" stroke-opacity="0.78"';
+  }
+
   function buildChartSvg(chart) {
     const algorithms = chart.algorithms || [];
     const points = chart.points || [];
@@ -204,7 +213,6 @@
     let legend = "";
     const legendStepX = 220;
     const legendHitW = Math.max(160, legendStepX - 12);
-    const memDashAttr = ' stroke-dasharray="1 3" stroke-opacity="0.75"';
 
     algorithms.forEach((algo, ai) => {
       const color = algo.color || "#64748b";
@@ -212,6 +220,7 @@
         const seriesIdx = ai * granularities.length + gi;
         const dash = dashForGranIndex(gi);
         const dashAttr = dash ? ` stroke-dasharray="${dash}"` : "";
+        const memLineAttr = memoryLineStyleAttr(gran);
 
         const pts = scales
           .map((sc) => {
@@ -236,7 +245,7 @@
             .join(" L ");
           const d0m = `M ${xOf(firstM.s).toFixed(1)},${yAlloc(firstM.mem).toFixed(1)}`;
           const dm = restM ? `${d0m} L ${restM}` : d0m;
-          pathInner += `<path d="${dm}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"${memDashAttr} />`;
+          pathInner += `<path d="${dm}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"${memLineAttr} />`;
 
           const first = pts[0];
           const rest = pts
@@ -271,7 +280,7 @@
         <text x="16" y="-5" class="lg">${legLabel}</text>
         <line x1="0" y1="10" x2="18" y2="10" stroke="${color}" stroke-width="2"${dashAttr} />
         <text x="22" y="13" class="lg-sm">Flexnpu-core</text>
-        <line x1="0" y1="24" x2="18" y2="24" stroke="${color}" stroke-width="2"${memDashAttr} />
+        <line x1="0" y1="24" x2="18" y2="24" stroke="${color}" stroke-width="2"${memLineAttr} />
         <text x="22" y="27" class="lg-sm">Flexnpu-memory</text>
         <text x="0" y="42" class="lg-sm">Core / memory alloc %</text>
         <rect class="legend-hit" data-series="${seriesIdx}" x="0" y="-16" width="${legendHitW}" height="22" fill="transparent" pointer-events="all" />
