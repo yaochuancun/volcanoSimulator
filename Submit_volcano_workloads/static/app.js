@@ -180,6 +180,7 @@
       const d = ["", "6 4", "3 3", "8 3 2 3"];
       return d[gi % d.length] || "";
     };
+    const isCoarseGran = (gran) => Number(gran) === 25;
 
     const PLOT_W = 880;
     const H = 520;
@@ -208,6 +209,9 @@
     const offsetStep = barW + 3;
     const offsetStart = (-((seriesCount - 1) * offsetStep) / 2);
 
+    // SVG defs (patterns) for coarse granularity bars.
+    let defs = "";
+
     let paths = "";
     let bars = "";
     let legend = "";
@@ -221,6 +225,20 @@
         const dash = dashForGranIndex(gi);
         const dashAttr = dash ? ` stroke-dasharray="${dash}"` : "";
         const memLineAttr = memoryLineStyleAttr(gran);
+
+        // Distinguish 25% granularity (coarse) from 1% (fine) on bars.
+        // Use a diagonal hatch pattern that inherits the algorithm color.
+        const coarse = isCoarseGran(gran);
+        const patId = `barHatch-${seriesIdx}`;
+        if (coarse) {
+          defs += `<pattern id="${patId}" patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(45)">
+            <rect width="8" height="8" fill="${color}" opacity="0.22"></rect>
+            <line x1="0" y1="0" x2="0" y2="8" stroke="${color}" stroke-width="2" opacity="0.55"></line>
+          </pattern>`;
+        }
+        const barFill = coarse ? `url(#${patId})` : color;
+        const barOpacity = coarse ? 0.92 : 0.2;
+        const barStrokeAttr = coarse ? ` stroke="${color}" stroke-width="0.8" stroke-opacity="0.65"` : "";
 
         const pts = scales
           .map((sc) => {
@@ -245,7 +263,15 @@
             .join(" L ");
           const d0m = `M ${xOf(firstM.s).toFixed(1)},${yAlloc(firstM.mem).toFixed(1)}`;
           const dm = restM ? `${d0m} L ${restM}` : d0m;
-          pathInner += `<path d="${dm}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round"${memLineAttr} />`;
+          pathInner += `<path d="${dm}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round"${memLineAttr} />`;
+          // Memory markers: smaller hollow circles
+          pathInner += pts
+            .map((p) => {
+              const cx = xOf(p.s).toFixed(1);
+              const cy = yAlloc(p.mem).toFixed(1);
+              return `<circle cx="${cx}" cy="${cy}" r="2.4" fill="#ffffff" fill-opacity="0.92" stroke="${color}" stroke-width="1.4" stroke-opacity="0.78" />`;
+            })
+            .join("");
 
           const first = pts[0];
           const rest = pts
@@ -255,6 +281,14 @@
           const d0 = `M ${xOf(first.s).toFixed(1)},${yAlloc(first.alloc).toFixed(1)}`;
           const d = rest ? `${d0} L ${rest}` : d0;
           pathInner += `<path d="${d}" fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round"${dashAttr} />`;
+          // Core markers: slightly larger solid circles
+          pathInner += pts
+            .map((p) => {
+              const cx = xOf(p.s).toFixed(1);
+              const cy = yAlloc(p.alloc).toFixed(1);
+              return `<circle cx="${cx}" cy="${cy}" r="3.0" fill="${color}" fill-opacity="0.95" stroke="#ffffff" stroke-width="1" stroke-opacity="0.9" />`;
+            })
+            .join("");
         }
         paths += `<g class="chart-series" data-series="${seriesIdx}">${pathInner}</g>`;
 
@@ -267,16 +301,17 @@
           const h = barH(pods);
           const y0 = padT + innerH;
           barsInner += `<g transform="translate(${bx.toFixed(1)},${y0})">
-          <rect x="0" y="${(-h).toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" fill="${color}" opacity="0.2" rx="2" />
+          <rect x="0" y="${(-h).toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" fill="${barFill}" opacity="${barOpacity}" rx="2"${barStrokeAttr} />
           <rect x="0" y="${(-h).toFixed(1)}" width="${barW}" height="3" fill="${color}" opacity="0.5" rx="1" />
         </g>`;
         });
         bars += `<g class="chart-series" data-series="${seriesIdx}">${barsInner}</g>`;
 
-        const legLabel = escapeXml(algo.name) + " · " + gran + "%";
+        const legGranLabel = coarse ? `${gran}% (coarse)` : `${gran}% (fine)`;
+        const legLabel = escapeXml(algo.name) + " · " + legGranLabel;
         const lx = 12 + seriesIdx * legendStepX;
         legend += `<g class="legend-item" data-series="${seriesIdx}" transform="translate(${lx},0)">
-        <rect x="0" y="-14" width="10" height="10" rx="2" fill="${color}" />
+        <rect x="0" y="-14" width="10" height="10" rx="2" fill="${barFill}"${coarse ? ` stroke="${color}" stroke-width="0.8" stroke-opacity="0.75"` : ""} />
         <text x="16" y="-5" class="lg">${legLabel}</text>
         <line x1="0" y1="10" x2="18" y2="10" stroke="${color}" stroke-width="2"${dashAttr} />
         <text x="22" y="13" class="lg-sm">Flexnpu-core</text>
@@ -326,6 +361,7 @@
         .legend-hit { cursor: pointer; transition: fill 0.15s ease, opacity 0.15s ease; }
         .legend-hit:hover { fill: rgba(148, 163, 184, 0.22); }
       </style>
+      <defs>${defs}</defs>
       <text transform="translate(${padL - 52},${(padT + H - padB) / 2}) rotate(-90)" text-anchor="middle" class="axis-label">Flexnpu core &amp; memory alloc %</text>
       <text transform="translate(${PLOT_W - padR + 52},${(padT + H - padB) / 2}) rotate(90)" text-anchor="middle" class="axis-label">Running pods</text>
       <text x="${(padL + PLOT_W - padR) / 2}" y="${H - 70}" text-anchor="middle" class="axis-label">Workload scale</text>
